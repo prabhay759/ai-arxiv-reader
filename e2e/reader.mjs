@@ -150,9 +150,7 @@ const run = async () => {
 
     const heading = await page.locator('h1').first().textContent()
     assert(/result/i.test(heading ?? ''), `unexpected heading: ${heading}`)
-
-    const total = Number((heading ?? '').replace(/[^0-9]/g, '').slice(0, 6))
-    assert(total > 0, 'search returned zero results')
+    assert((await page.locator('h3 a').count()) > 0, 'search returned zero results')
   })
 
   await check('ranks a title match above abstract-only matches', async () => {
@@ -162,6 +160,25 @@ const run = async () => {
 
   await check('highlights matched terms in results', async () => {
     assert((await page.locator('mark').count()) > 0, 'no <mark> emphasis found')
+  })
+
+  await check('never reports a result count it did not actually compute', async () => {
+    // Browsing a category exits early once the page is full, so the number of
+    // rows scanned is not the number of matching papers. Claiming it would be
+    // a plain falsehood ("50 results" for a category with thousands).
+    await page.goto(`${BASE}search?cat=cs.LG&sort=newest`, { waitUntil: 'networkidle' })
+    await page.waitForSelector('h3 a', { timeout: 20000 })
+
+    const heading = (await page.locator('h1').first().textContent()) ?? ''
+    const shown = await page.locator('h3 a').count()
+    const claimed = Number(heading.replace(/[^0-9]/g, ''))
+
+    if (claimed) {
+      assert(
+        claimed !== shown || shown < 25,
+        `heading claims exactly the number of rows rendered (${claimed}), which is a scan artefact, not a total`
+      )
+    }
   })
 
   await check('field-scoped query works', async () => {

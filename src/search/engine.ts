@@ -13,7 +13,18 @@ export interface SearchHit {
 
 export interface SearchResult {
   hits: SearchHit[]
+  /** Matches found. See `totalKnown` — this is a lower bound when false. */
   total: number
+  /**
+   * False when the search stopped early and `total` is only what it counted
+   * so far: browsing a category exits as soon as the page is full, and term
+   * searches cap their candidate set. Showing that number as "N results"
+   * would be a straightforwardly wrong claim, so the UI omits the count
+   * instead.
+   */
+  totalKnown: boolean
+  /** True when more results are likely available past the current page. */
+  hasMore: boolean
   /** Set when the query reached past the indexed-abstract window. */
   notice?: string
   tookMs: number
@@ -43,6 +54,13 @@ function recencyBoost(published: string, newest: string): number {
   return 1 + 0.35 * Math.exp(-ageYears / 6)
 }
 
+/**
+ * Ceiling on how many scored documents get resolved to metadata. A very common
+ * term can match tens of thousands of papers; fetching display records for all
+ * of them would stall the page for results nobody scrolls to.
+ */
+const MAX_CANDIDATES = 4000
+
 export class SearchEngine {
   constructor(private readonly corpus: CorpusClient) {}
 
@@ -65,13 +83,19 @@ export class SearchEngine {
 
     const scores = await this.scoreTerms(parsed, manifest.docCount, signal)
     if (scores.size === 0) {
-      return { hits: [], total: 0, tookMs: performance.now() - started, ...this.notice(parsed, manifest.abstractCutoff) }
+      return {
+        hits: [],
+        total: 0,
+        totalKnown: true,
+        hasMore: false,
+        tookMs: performance.now() - started,
+        ...this.notice(parsed, manifest.abstractCutoff),
+      }
     }
 
     // Resolve every candidate to apply filters and sort. Candidate sets are
     // bounded by the rarest query term, so this stays small for real queries;
     // very common single terms are capped to keep the fetch bounded.
-    const MAX_CANDIDATES = 4000
     const candidates = [...scores.entries()]
       .sort((a, b) => b[1].score - a[1].score)
       .slice(0, MAX_CANDIDATES)
@@ -101,6 +125,9 @@ export class SearchEngine {
     return {
       hits: hits.slice(offset, offset + limit),
       total: hits.length,
+      // Hitting the candidate cap means real matches were left unscored.
+      totalKnown: scores.size <= MAX_CANDIDATES,
+      hasMore: hits.length > offset + limit,
       tookMs: performance.now() - started,
       ...this.notice(parsed, manifest.abstractCutoff),
     }
@@ -235,6 +262,11 @@ export class SearchEngine {
       wantOldest ? manifest.chunkCount - 1 - i : i
     )
 
+    // Fetch one extra result beyond the page so we can tell whether more
+    // exist without scanning the rest of the corpus.
+    const needed = offset + limit + 1
+    let exhausted = true
+
     for (const chunk of chunkOrder) {
       const rows = await this.corpus.docChunk(chunk, signal)
 
@@ -250,14 +282,20 @@ export class SearchEngine {
         })
       }
 
-      // Chunks are already in sort order, so once we have a full page plus the
-      // caller's offset there is nothing better further down.
-      if (hits.length >= offset + limit) break
+      // Chunks are already in sort order, so once we have a full page there is
+      // nothing better further down — but stopping means we no longer know the
+      // true total, which the caller must not present as one.
+      if (hits.length >= needed) {
+        exhausted = false
+        break
+      }
     }
 
     return {
       hits: hits.slice(offset, offset + limit),
       total: hits.length,
+      totalKnown: exhausted,
+      hasMore: hits.length > offset + limit,
       tookMs: performance.now() - started,
       ...this.notice(parsed, manifest.abstractCutoff),
     }

@@ -1,0 +1,92 @@
+name: Build index and deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Every 6 hours, so new arXiv papers show up within hours of posting.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      full_harvest:
+        description: 'Re-harvest the whole window instead of updating incrementally'
+        type: boolean
+        default: false
+
+# Let a running deploy finish rather than cancelling it — a half-deployed
+# Pages site would serve an index that does not match its manifest.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run test
+
+      # The harvested corpus is cached between runs so normal runs only fetch
+      # what changed. The key rotates daily so the cache is refreshed rather
+      # than growing stale; restore-keys falls back to the most recent one.
+      - name: Restore harvested corpus
+        id: corpus-cache
+        uses: actions/cache@v4
+        with:
+          path: .corpus
+          key: arxiv-corpus-${{ hashFiles('config/corpus.json') }}-${{ github.run_id }}
+          restore-keys: |
+            arxiv-corpus-${{ hashFiles('config/corpus.json') }}-
+
+      # A cold cache means a full harvest from config.historyStart, which takes
+      # roughly half an hour. Warm runs finish in seconds.
+      - name: Harvest arXiv metadata
+        run: node scripts/harvest.mjs ${{ inputs.full_harvest && '--full' || '' }}
+
+      - name: Build search index
+        run: node --max-old-space-size=6144 scripts/build-index.mjs
+
+      - name: Build site
+        env:
+          # Public OAuth client id, not a secret. Absent -> guest-only mode.
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          BASE_PATH: ${{ vars.BASE_PATH || format('/{0}/', github.event.repository.name) }}
+        run: npm run build
+
+      - name: Report site size
+        run: |
+          echo "### Deployed site" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          du -sh dist >> "$GITHUB_STEP_SUMMARY"
+          du -sh dist/data/* >> "$GITHUB_STEP_SUMMARY"
+          node -e "const m=require('./dist/data/manifest.json');console.log('papers:',m.docCount,'terms:',m.stats.termCount)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

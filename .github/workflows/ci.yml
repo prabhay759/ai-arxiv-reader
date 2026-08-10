@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run test
+
+      # Build a small slice of the corpus so the pipeline itself is exercised
+      # on every change — a broken indexer would otherwise only surface on the
+      # scheduled deploy.
+      - name: Smoke-test the data pipeline
+        run: |
+          node scripts/harvest.mjs --from "$(date -u -d '2 days ago' +%Y-%m-%d)" --sets cs:cs:AI --max-pages 1
+          node scripts/build-index.mjs
+          node -e "
+            const m = require('./public/data/manifest.json');
+            if (!m.docCount) throw new Error('index built with no papers');
+            console.log('indexed', m.docCount, 'papers,', m.stats.termCount, 'terms');
+          "
+
+      - run: npm run build
+
+      - name: End-to-end
+        run: |
+          npx playwright install --with-deps chromium
+          npx vite preview --port 4173 --host 127.0.0.1 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:4173/ai-arxiv-reader/ && break
+            sleep 2
+          done
+          node e2e/reader.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e/screenshots
+          if-no-files-found: ignore

@@ -105,14 +105,7 @@ export default function Home() {
           </Link>
         </div>
 
-        {error && (
-          <ErrorNote
-            message={
-              `${error} — the search index is built by CI. ` +
-              'Run `npm run harvest && npm run build:index` to generate it locally.'
-            }
-          />
-        )}
+        {error && <ErrorNote message={error} />}
 
         {!error && !recent && <Spinner label="Loading latest papers" />}
 

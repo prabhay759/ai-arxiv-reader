@@ -33,7 +33,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.svg', 'offline.html'],
+      // The SPA shell is precached and navigateFallback serves it offline, so
+      // no separate offline page is needed.
+      includeAssets: ['favicon.svg'],
       manifest: {
         name: 'arXiv AI Reader',
         short_name: 'arXiv Reader',

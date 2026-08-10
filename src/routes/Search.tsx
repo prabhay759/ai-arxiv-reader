@@ -30,6 +30,8 @@ export default function Search() {
 
   const [hits, setHits] = useState<SearchHit[]>([])
   const [total, setTotal] = useState(0)
+  const [totalKnown, setTotalKnown] = useState(true)
+  const [hasMore, setHasMore] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [tookMs, setTookMs] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -69,6 +71,8 @@ export default function Search() {
         if (controller.signal.aborted) return
         setHits(result.hits)
         setTotal(result.total)
+        setTotalKnown(result.totalKnown)
+        setHasMore(result.hasMore)
         setNotice(result.notice)
         setTookMs(result.tookMs)
         if (query.trim()) void recordSearch(query, result.total)
@@ -112,18 +116,21 @@ export default function Search() {
   }, [hits, highlightTerms])
 
   const loadMore = useCallback(async () => {
-    if (loading || hits.length >= total) return
+    if (loading || !hasMore) return
     setLoading(true)
     const controller = new AbortController()
     try {
       const result = await runSearch(hits.length, controller.signal)
       setHits((current) => [...current, ...result.hits])
+      setTotal(result.total)
+      setTotalKnown(result.totalKnown)
+      setHasMore(result.hasMore)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [hits.length, total, loading, runSearch])
+  }, [hits.length, hasMore, loading, runSearch])
 
   // j/k result navigation, scoped to this route.
   useEffect(() => {
@@ -180,13 +187,20 @@ export default function Search() {
       <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-lg font-semibold">
-            {hasQuery ? (
+            {!hasQuery ? (
+              'Browse papers'
+            ) : totalKnown ? (
               <>
                 {total.toLocaleString()} result{total === 1 ? '' : 's'}
                 {query && <span className="text-muted"> for “{query}”</span>}
               </>
             ) : (
-              'Browse papers'
+              <>
+                {/* The search stopped early, so the exact count isn't known —
+                    say what is true rather than print the partial number. */}
+                Top results
+                {query && <span className="text-muted"> for “{query}”</span>}
+              </>
             )}
           </h1>
           {tookMs > 0 && hasQuery && (
@@ -230,10 +244,12 @@ export default function Search() {
 
         {loading && <Spinner label="Searching" />}
 
-        {!loading && hits.length > 0 && hits.length < total && (
+        {!loading && hits.length > 0 && hasMore && (
           <div className="mt-4 flex justify-center">
             <button type="button" className="btn" onClick={() => void loadMore()}>
-              Load more ({(total - hits.length).toLocaleString()} remaining)
+              {totalKnown
+                ? `Load more (${(total - hits.length).toLocaleString()} remaining)`
+                : 'Load more'}
             </button>
           </div>
         )}

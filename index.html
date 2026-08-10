@@ -10,6 +10,10 @@
       content="Search, read and resume AI papers from arXiv. Works offline, no installation."
     />
     <meta name="color-scheme" content="light dark" />
+    <!-- Browser chrome follows the active theme; the manifest's single
+         theme_color cannot vary, so these take precedence where supported. -->
+    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0c0e" media="(prefers-color-scheme: dark)" />
     <script>
       // Applied before first paint so a reload never flashes the wrong theme.
       // Mirrors resolveTheme() in src/app/theme.ts.
