@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>arXiv AI Reader</title>
+    <meta
+      name="description"
+      content="Search, read and resume AI papers from arXiv. Works offline, no installation."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Applied before first paint so a reload never flashes the wrong theme.
+      // Mirrors resolveTheme() in src/app/theme.ts.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('arxiv-reader:theme') || 'system'
+          var dark =
+            stored === 'dark' ||
+            (stored === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light')
+        }
+      })()
+    </script>
+    <script>
+      // Decode the deep link that public/404.html encoded into ?/path, so a
+      // refreshed or shared URL lands on the right route. Must run before the
+      // router mounts.
+      ;(function () {
+        var l = window.location
+        if (l.search.charAt(1) !== '/') return
+        var decoded = l.search
+          .slice(1)
+          .split('&')
+          .map(function (s) {
+            return s.replace(/~and~/g, '&')
+          })
+          .join('?')
+        window.history.replaceState(null, '', l.pathname.replace(/\/$/, '') + decoded + l.hash)
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="font: 16px/1.5 system-ui; padding: 2rem; max-width: 40rem">
+        arXiv AI Reader needs JavaScript to search and render papers. You can still read
+        any paper directly at <a href="https://arxiv.org">arxiv.org</a>.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

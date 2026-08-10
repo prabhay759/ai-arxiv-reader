@@ -1,0 +1,248 @@
+/*
+ * Styling for arXiv's LaTeXML markup, the pdf.js text layer, and highlights.
+ * arXiv's own stylesheet is deliberately NOT loaded — it is a full page theme
+ * that would fight the app shell and ignore dark mode. These rules restyle the
+ * semantic ltx_* classes instead.
+ */
+
+.ltx-paper {
+  font-family: var(--reader-family);
+  font-size: var(--reader-font-size);
+  line-height: var(--reader-line-height);
+  max-width: var(--reader-measure);
+  margin-inline: auto;
+  color: rgb(var(--c-ink));
+  overflow-wrap: break-word;
+}
+
+.ltx-paper p {
+  margin-block: 0.9em;
+}
+
+/* The duplicated title/authors/abstract and the arXiv licence stamp are
+   removed in stripChrome() rather than hidden here — they can be nested at any
+   depth, which a CSS child selector cannot reach. */
+
+.ltx-paper h1,
+.ltx-paper h2,
+.ltx-paper h3,
+.ltx-paper h4,
+.ltx-paper .ltx_title_section,
+.ltx-paper .ltx_title_subsection,
+.ltx-paper .ltx_title_subsubsection {
+  font-family: theme('fontFamily.sans');
+  font-weight: 650;
+  line-height: 1.25;
+  margin-block: 1.8em 0.6em;
+  scroll-margin-top: 6rem;
+}
+
+.ltx-paper .ltx_title_section {
+  font-size: 1.35em;
+}
+.ltx-paper .ltx_title_subsection {
+  font-size: 1.15em;
+}
+.ltx-paper .ltx_title_subsubsection {
+  font-size: 1.02em;
+}
+
+.ltx-paper section {
+  scroll-margin-top: 6rem;
+}
+
+.ltx-paper a {
+  color: rgb(var(--c-accent));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Figures and tables ------------------------------------------------------ */
+
+.ltx-paper figure,
+.ltx-paper .ltx_figure,
+.ltx-paper .ltx_table {
+  margin-block: 1.6em;
+  text-align: center;
+}
+
+.ltx-paper img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+}
+
+/* Paper figures are usually white-background raster images; in dark mode they
+   glare. Dimming beats inverting, which would wreck colour-coded plots. */
+[data-theme='dark'] .ltx-paper img {
+  filter: brightness(0.86) contrast(1.05);
+}
+
+.ltx-paper .ltx_caption {
+  display: block;
+  margin-top: 0.6em;
+  font-family: theme('fontFamily.sans');
+  font-size: 0.82em;
+  line-height: 1.5;
+  color: rgb(var(--c-muted));
+  text-align: left;
+}
+
+.ltx-paper table {
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+
+.ltx-paper .ltx_tabular {
+  display: block;
+  overflow-x: auto;
+}
+
+.ltx-paper td,
+.ltx-paper th {
+  padding: 0.35em 0.7em;
+  border-color: rgb(var(--c-edge));
+}
+
+.ltx-paper .ltx_border_t {
+  border-top: 1px solid rgb(var(--c-edge));
+}
+.ltx-paper .ltx_border_b,
+.ltx-paper .ltx_border_bb {
+  border-bottom: 1px solid rgb(var(--c-edge));
+}
+
+/* Math -------------------------------------------------------------------- */
+
+/* arXiv HTML uses native MathML, which every current browser renders without
+   a JS library — so equations work offline and cost nothing to load. Long
+   display equations still need to scroll on narrow screens. */
+.ltx-paper math {
+  font-size: 1em;
+}
+
+.ltx-paper .ltx_equation,
+.ltx-paper .ltx_eqn_table {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-block: 1.2em;
+  padding-block: 0.2em;
+}
+
+/* Bibliography and footnotes ---------------------------------------------- */
+
+.ltx-paper .ltx_bibliography {
+  font-size: 0.85em;
+}
+
+.ltx-paper .ltx_bibitem {
+  margin-block: 0.7em;
+  scroll-margin-top: 6rem;
+}
+
+.ltx-paper .ltx_note_content {
+  font-size: 0.85em;
+  color: rgb(var(--c-muted));
+}
+
+.ltx-paper .ltx_listing,
+.ltx-paper pre {
+  overflow-x: auto;
+  padding: 0.8em 1em;
+  border-radius: 0.5rem;
+  background: rgb(var(--c-raised));
+  font-family: theme('fontFamily.mono');
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+
+/* Highlights -------------------------------------------------------------- */
+
+/* Preferred path: the CSS Custom Highlight API paints ranges without touching
+   the DOM, so highlights can span MathML without breaking equations. */
+::highlight(reader-highlight-yellow) {
+  background-color: rgb(var(--hl-yellow) / 0.55);
+}
+::highlight(reader-highlight-green) {
+  background-color: rgb(var(--hl-green) / 0.55);
+}
+::highlight(reader-highlight-blue) {
+  background-color: rgb(var(--hl-blue) / 0.55);
+}
+::highlight(reader-highlight-pink) {
+  background-color: rgb(var(--hl-pink) / 0.55);
+}
+::highlight(reader-highlight-purple) {
+  background-color: rgb(var(--hl-purple) / 0.55);
+}
+
+/* Fallback for browsers without the Highlight API. */
+mark.reader-highlight {
+  color: inherit;
+  border-radius: 2px;
+  padding-inline: 1px;
+  cursor: pointer;
+}
+mark.reader-highlight--yellow {
+  background-color: rgb(var(--hl-yellow) / 0.55);
+}
+mark.reader-highlight--green {
+  background-color: rgb(var(--hl-green) / 0.55);
+}
+mark.reader-highlight--blue {
+  background-color: rgb(var(--hl-blue) / 0.55);
+}
+mark.reader-highlight--pink {
+  background-color: rgb(var(--hl-pink) / 0.55);
+}
+mark.reader-highlight--purple {
+  background-color: rgb(var(--hl-purple) / 0.55);
+}
+
+/* PDF --------------------------------------------------------------------- */
+
+/*
+ * pdf.js text layer: invisible text positioned exactly over the rendered
+ * canvas. It is what makes the PDF selectable, searchable with the browser's
+ * own find, and reachable by screen readers — a canvas-only viewer is an
+ * image of a paper, not a paper.
+ */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1;
+  text-align: initial;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+
+.pdf-text-layer :is(span, br) {
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  color: transparent;
+}
+
+.pdf-text-layer ::selection {
+  background: rgb(var(--c-accent) / 0.35);
+}
+
+/* Dim the white page in dark mode rather than inverting it: inversion turns
+   every figure into a photographic negative. */
+[data-theme='dark'] .pdf-invertable canvas {
+  filter: invert(0.9) hue-rotate(180deg);
+}
+
+@media print {
+  .pdf-text-layer {
+    display: none;
+  }
+}

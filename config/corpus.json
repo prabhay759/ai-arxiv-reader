@@ -1,0 +1,19 @@
+{
+  "$comment": "Knobs for the CI data pipeline. Raising historyStart shrinks the site; lowering it widens coverage. abstractWindowMonths controls how far back full-text abstract search reaches (abstracts dominate the size budget).",
+  "categories": [
+    "cs.AI",
+    "cs.LG",
+    "cs.CL",
+    "cs.CV",
+    "cs.NE",
+    "cs.RO",
+    "cs.IR",
+    "cs.MA",
+    "stat.ML"
+  ],
+  "historyStart": "2018-01-01",
+  "abstractWindowMonths": 24,
+  "docsPerChunk": 512,
+  "tokenShardPrefixLength": 2,
+  "recentFeedSize": 200
+}

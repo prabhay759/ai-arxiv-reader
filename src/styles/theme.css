@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Palette is defined as raw RGB triplets so Tailwind's <alpha-value> works.
+ * Light is the base; dark overrides only what changes.
+ */
+:root {
+  --c-canvas: 250 250 249;
+  --c-surface: 255 255 255;
+  --c-raised: 245 245 244;
+  --c-edge: 231 229 228;
+  --c-ink: 28 25 23;
+  --c-muted: 87 83 78;
+  --c-faint: 120 113 108;
+  --c-accent: 180 65 30;
+  --c-accent-ink: 255 255 255;
+
+  --hl-yellow: 253 224 71;
+  --hl-green: 134 239 172;
+  --hl-blue: 147 197 253;
+  --hl-pink: 249 168 212;
+  --hl-purple: 216 180 254;
+
+  /* Reader typography, live-adjustable from the reader settings panel. */
+  --reader-font-size: 18px;
+  --reader-line-height: 1.7;
+  --reader-measure: 68ch;
+  --reader-family: theme('fontFamily.serif');
+}
+
+[data-theme='dark'] {
+  --c-canvas: 12 12 14;
+  --c-surface: 24 24 27;
+  --c-raised: 39 39 42;
+  --c-edge: 63 63 70;
+  --c-ink: 244 244 245;
+  --c-muted: 168 162 158;
+  --c-faint: 130 125 122;
+  --c-accent: 251 146 60;
+  --c-accent-ink: 24 24 27;
+
+  --hl-yellow: 133 105 10;
+  --hl-green: 34 105 62;
+  --hl-blue: 30 76 138;
+  --hl-pink: 136 40 90;
+  --hl-purple: 91 46 138;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    min-height: 100dvh;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2;
+    --tw-ring-offset-color: rgb(var(--c-canvas));
+  }
+
+  /* Only suppress the ring for mouse users, never for keyboard users. */
+  :focus:not(:focus-visible) {
+    @apply outline-none;
+  }
+
+  ::selection {
+    background: rgb(var(--c-accent) / 0.25);
+  }
+}
+
+@layer components {
+  .skip-link {
+    @apply absolute left-2 top-2 z-50 -translate-y-24 rounded-md bg-accent px-3 py-2
+           text-sm font-medium text-accent-ink transition-transform focus:translate-y-0;
+  }
+
+  .card {
+    @apply rounded-xl border border-edge bg-surface;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-edge
+           bg-surface px-3 py-1.5 text-sm font-medium text-ink transition-colors
+           hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-accent text-accent-ink hover:opacity-90;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-raised;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm text-ink
+           placeholder:text-faint focus:border-accent;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-edge bg-raised
+           px-2.5 py-0.5 text-xs font-medium text-muted;
+  }
+}

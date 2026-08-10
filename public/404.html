@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>arXiv AI Reader</title>
+    <script>
+      // GitHub Pages has no server-side rewrite, so a hard load of a deep link
+      // like /ai-arxiv-reader/paper/2608.07460 hits this 404 page. Encode the
+      // path into a query string and bounce to index.html, which decodes it
+      // back before React Router mounts. See the matching block in index.html.
+      // Technique: rafgraph/spa-github-pages.
+      ;(function () {
+        var segmentsToKeep = 1 // repo name in the path for project Pages sites
+        var l = window.location
+        var path = l.pathname
+          .split('/')
+          .slice(0, 1 + segmentsToKeep)
+          .join('/')
+        var rest = l.pathname.slice(path.length).replace(/^\//, '')
+        l.replace(
+          l.protocol +
+            '//' +
+            l.hostname +
+            (l.port ? ':' + l.port : '') +
+            path +
+            '/?/' +
+            rest.replace(/&/g, '~and~') +
+            (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+            l.hash
+        )
+      })()
+    </script>
+  </head>
+  <body></body>
+</html>
