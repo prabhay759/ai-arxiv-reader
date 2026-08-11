@@ -41,8 +41,34 @@ jobs:
       - name: Configure GitHub Pages
         id: pages
         uses: actions/configure-pages@v5
+        continue-on-error: true
         with:
+          # Self-enables Pages where the token is allowed to. On many accounts
+          # it is not ("Resource not accessible by integration"), which is why
+          # the next step translates the failure into instructions.
           enablement: true
+
+      # actions/configure-pages fails with a raw API error that does not say
+      # what to do about it. Turn it into the one instruction that fixes it.
+      - name: Explain how to enable Pages
+        if: steps.pages.outcome == 'failure'
+        run: |
+          echo "::error title=GitHub Pages is not enabled::Enable it once, then re-run this workflow."
+          {
+            echo "## GitHub Pages needs enabling"
+            echo
+            echo "This deploy cannot publish until Pages is turned on for the repository."
+            echo "The workflow tried to enable it automatically and was refused"
+            echo '(`Resource not accessible by integration`), which means it has to be done'
+            echo "by hand once:"
+            echo
+            echo "1. Go to **Settings → Pages**"
+            echo "2. Under **Source**, choose **GitHub Actions**"
+            echo "3. Re-run this workflow"
+            echo
+            echo "After that it never needs doing again — including for the scheduled refreshes."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - uses: actions/setup-node@v4
         with:

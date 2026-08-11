@@ -96,25 +96,28 @@ sync and merges your existing local data into the account on first use.
 
 ## Deploy it
 
-### 1. Deploy
+### 1. Turn on Pages (once)
 
-Push to `main`, or run the **Build index and deploy to Pages** workflow from the
-Actions tab. That's it — the workflow enables GitHub Pages itself on the first
-run (`actions/configure-pages` with `enablement: true`), so there is no repo
-settings step.
+**Settings → Pages → Source: GitHub Actions.**
+
+The workflow tries to do this for you, but GitHub usually refuses to let a
+workflow token create a Pages site (`Resource not accessible by integration`),
+so the first time it has to be a human click. If the deploy fails with
+*"GitHub Pages is not enabled"*, this is what it wants.
+
+### 2. Deploy
+
+Push to `main`, or run **Build index and deploy to Pages** from the Actions tab.
 
 Your site appears at `https://<user>.github.io/<repo>/` — for this repository,
 **https://prabhay759.github.io/ai-arxiv-reader/**.
 
 The first run harvests the whole window and takes roughly 90 minutes; later runs
 are incremental and finish in a couple of minutes. Pages is configured as the
-very first step of the job, so if anything is wrong with it you find out in
-seconds rather than after the harvest.
+very first step of the job, so a misconfiguration fails in seconds rather than
+after the harvest.
 
-> If your organisation restricts Pages, `enablement: true` will fail and you'll
-> need **Settings → Pages → Source: GitHub Actions** set by an admin once.
-
-### 2. Enable Google sign-in
+### 3. Enable Google sign-in
 
 The app is fully usable without this — everything works, it just won't follow
 you to another device. Setting it up takes about five minutes and costs nothing.
@@ -174,7 +177,7 @@ from isn't in the list from step 4. The app's error message tells you the exact
 string to paste, and the Settings page shows your current origin. The usual
 culprits are a trailing slash, `http` vs `https`, or a missing port.
 
-### 2b. Refreshing the data
+### 4. Refreshing the data
 
 The search index is a static build artefact, so "refreshing" means rebuilding
 and redeploying it. You never have to do this by hand — but here's every lever:
@@ -208,7 +211,7 @@ corpus and watermark after every completed category, so a re-run resumes at the
 first unfinished one rather than starting over. Repeat until it completes; after
 that, refreshes are incremental and quick.
 
-### 3. Tune the corpus (optional)
+### 5. Tune the corpus (optional)
 
 `config/corpus.json` controls what gets indexed:
 
