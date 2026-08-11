@@ -34,6 +34,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # First, deliberately. This turns GitHub Pages on if it isn't already
+      # (no manual repo-settings step needed) and resolves the site's base
+      # path. Running it before the harvest means a Pages misconfiguration
+      # fails in seconds rather than after an hour of harvesting.
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -70,7 +80,9 @@ jobs:
         env:
           # Public OAuth client id, not a secret. Absent -> guest-only mode.
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
-          BASE_PATH: ${{ vars.BASE_PATH || format('/{0}/', github.event.repository.name) }}
+          # Taken from the Pages config itself, so the base path is right for a
+          # project site, a user site or a custom domain without being guessed.
+          BASE_PATH: ${{ vars.BASE_PATH || steps.pages.outputs.base_path }}
         run: npm run build
 
       - name: Report site size
@@ -82,7 +94,7 @@ jobs:
           node -e "const m=require('./dist/data/manifest.json');console.log('papers:',m.docCount,'terms:',m.stats.termCount)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/configure-pages@v5
+      # Pages was already configured at the top of the job.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

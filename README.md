@@ -96,15 +96,23 @@ sync and merges your existing local data into the account on first use.
 
 ## Deploy it
 
-### 1. Enable GitHub Pages
+### 1. Deploy
 
-Repository **Settings → Pages → Source: GitHub Actions**.
+Push to `main`, or run the **Build index and deploy to Pages** workflow from the
+Actions tab. That's it — the workflow enables GitHub Pages itself on the first
+run (`actions/configure-pages` with `enablement: true`), so there is no repo
+settings step.
 
-Then run the **Build index and deploy to Pages** workflow (Actions tab →
-*Run workflow*). The first run does a full harvest and takes roughly 30–45
-minutes; later runs are incremental and finish in a couple of minutes.
+Your site appears at `https://<user>.github.io/<repo>/` — for this repository,
+**https://prabhay759.github.io/ai-arxiv-reader/**.
 
-Your site appears at `https://<user>.github.io/<repo>/`.
+The first run harvests the whole window and takes roughly 90 minutes; later runs
+are incremental and finish in a couple of minutes. Pages is configured as the
+very first step of the job, so if anything is wrong with it you find out in
+seconds rather than after the harvest.
+
+> If your organisation restricts Pages, `enablement: true` will fail and you'll
+> need **Settings → Pages → Source: GitHub Actions** set by an admin once.
 
 ### 2. Enable Google sign-in
 
