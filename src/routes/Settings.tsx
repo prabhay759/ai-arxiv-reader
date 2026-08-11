@@ -3,6 +3,7 @@ import type { ThemePreference } from '@/types'
 import { SYNC_AVAILABLE } from '@/app/services'
 import { useAppStore } from '@/app/store'
 import { relativeDate, toBibTeX } from '@/app/format'
+import { IndexStatus } from '@/components/IndexStatus'
 import { clearLocalData, db, localDataCount } from '@/store/db'
 import { clearSearchHistory } from '@/store/library'
 import { exportLocal, importLocal, runSync, stopSync } from '@/sync'
@@ -100,9 +101,25 @@ export default function Settings() {
               normally — they just won&rsquo;t follow you to another browser.
             </p>
             <p className="mt-2">
-              To enable it, set the <code className="font-mono text-xs">VITE_GOOGLE_CLIENT_ID</code>{' '}
-              repository variable to a Google OAuth client id and redeploy. The README has the
-              exact steps.
+              To enable it, create a free Google OAuth client id, set it as the{' '}
+              <code className="font-mono text-xs">VITE_GOOGLE_CLIENT_ID</code> repository
+              variable, and redeploy. The client id is a public identifier, not a secret.
+            </p>
+            <p className="mt-2">
+              <a
+                className="underline hover:text-ink"
+                href="https://github.com/prabhay759/ai-arxiv-reader#enable-google-sign-in"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Step-by-step setup guide →
+              </a>
+            </p>
+            <p className="mt-2 text-xs text-faint">
+              Whichever origin you serve the app from must be listed under &ldquo;Authorised
+              JavaScript origins&rdquo; on the OAuth client, exactly — including the port. This
+              site&rsquo;s origin is{' '}
+              <code className="font-mono">{window.location.origin}</code>.
             </p>
           </div>
         ) : (
@@ -214,6 +231,15 @@ export default function Settings() {
               {message}
             </p>
           )}
+        </div>
+      </section>
+
+      <section aria-labelledby="index-heading">
+        <h2 id="index-heading" className="mb-2 text-sm font-semibold">
+          Search index
+        </h2>
+        <div className="card p-4">
+          <IndexStatus />
         </div>
       </section>
 

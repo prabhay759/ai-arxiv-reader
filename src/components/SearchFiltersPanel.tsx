@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
-import { PRIMARY_CATEGORIES, categoryName } from '@/app/format'
+import { categoryName } from '@/app/format'
+import { useCorpusCategories } from '@/app/useManifest'
 import { db } from '@/store/db'
 import { deleteSavedSearch } from '@/store/library'
 import type { SearchFilters, SortMode } from '@/types'
@@ -22,6 +23,7 @@ export function SearchFiltersPanel({
   onSave?: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const categories = useCorpusCategories()
   const saved = useLiveQuery(async () => {
     const rows = await db.savedSearches.toArray()
     return rows.filter((row) => !row.deleted).sort((a, b) => b.createdAt - a.createdAt)
@@ -78,7 +80,7 @@ export function SearchFiltersPanel({
             Category
           </legend>
           <div className="space-y-1">
-            {PRIMARY_CATEGORIES.map((category) => (
+            {categories.map((category) => (
               <label
                 key={category}
                 className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-sm hover:bg-raised"

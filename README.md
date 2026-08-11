@@ -62,7 +62,8 @@ sync and merges your existing local data into the account on first use.
 ## Features
 
 **Search**
-- Full-text search over titles, authors, categories and abstracts
+- Full-text search over titles, authors, categories and abstracts across the
+  core AI categories (`cs.AI`, `cs.LG`, `cs.CL`, `cs.CV`, `cs.NE`, `stat.ML`)
 - Query language: `ti:diffusion`, `au:"Yann LeCun"`, `abs:contrastive`,
   `cat:cs.LG`, `"exact phrase"`, `-exclude`
 - Filters by category and date range; sort by relevance, newest or oldest
@@ -88,6 +89,8 @@ sync and merges your existing local data into the account on first use.
 - Light, dark and system themes
 - Keyboard shortcuts (`?` lists them)
 - Every search and paper is a shareable deep link
+- Settings shows when the index was last refreshed, what it covers, and warns
+  if the scheduled rebuild has stalled
 
 ---
 
@@ -103,30 +106,92 @@ minutes; later runs are incremental and finish in a couple of minutes.
 
 Your site appears at `https://<user>.github.io/<repo>/`.
 
-### 2. Enable Google sign-in (optional)
+### 2. Enable Google sign-in
 
-The app is fully usable without this. To turn on cross-device sync:
+The app is fully usable without this — everything works, it just won't follow
+you to another device. Setting it up takes about five minutes and costs nothing.
 
-1. In the [Google Cloud Console](https://console.cloud.google.com/), create a
-   project and enable the **Google Drive API**.
-2. **APIs & Services → OAuth consent screen**: choose *External*, fill in the
-   app name and your email, and add the scope
-   `https://www.googleapis.com/auth/drive.appdata`.
-3. **Credentials → Create credentials → OAuth client ID → Web application**.
-   Add your Pages origin (e.g. `https://<user>.github.io`) to
-   **Authorised JavaScript origins**. No redirect URI is needed — the app uses
-   the token flow.
-4. Copy the client ID into the repository variable
-   **Settings → Secrets and variables → Actions → Variables →
-   `VITE_GOOGLE_CLIENT_ID`**, then re-run the deploy workflow.
+**Step 1 — Create a project**
+Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a
+project (any name).
 
-The client ID is a public identifier, not a secret — it ships in the JavaScript
-bundle by design, which is why it's a *variable* rather than a secret.
+**Step 2 — Enable the Drive API**
+**APIs & Services → Library** → search *Google Drive API* → **Enable**.
+This is what lets the app write its sync file to your Drive.
 
-> **Expect an "unverified app" warning on first sign-in.** `drive.appdata` is a
-> sensitive scope, so until you submit the app for Google verification, users
-> see an interstitial and must click *Advanced → Go to <app>*. This is a Google
-> review process, not a bug. Guest mode is unaffected.
+**Step 3 — Configure the consent screen**
+**APIs & Services → OAuth consent screen** → choose **External** → fill in the
+app name and your email.
+
+- Under **Scopes**, add `https://www.googleapis.com/auth/drive.appdata`.
+- Under **Test users**, add your own Google address. While the app is in
+  *Testing* mode only listed users can sign in — up to 100 of them.
+
+**Step 4 — Create the OAuth client**
+**Credentials → Create credentials → OAuth client ID → Web application**.
+
+Under **Authorised JavaScript origins**, add every origin you'll load the app
+from — exactly, with no trailing slash:
+
+| Origin | For |
+| --- | --- |
+| `https://<user>.github.io` | GitHub Pages (note: the origin, *not* the `/repo/` path) |
+| `http://localhost:5173` | local development |
+
+Leave **Authorised redirect URIs** empty. This app uses the token flow, so it
+never redirects.
+
+**Step 5 — Publish the client ID**
+Copy the client ID (it looks like `1234-abc.apps.googleusercontent.com`) into
+**repo Settings → Secrets and variables → Actions → Variables** as
+`VITE_GOOGLE_CLIENT_ID`, then re-run the deploy workflow.
+
+For local development, copy `.env.example` to `.env.local` and put it there
+instead.
+
+> The client ID is a **public identifier, not a secret** — it ships in the
+> JavaScript bundle by design. That's why it's a repository *variable* rather
+> than a secret.
+
+#### Two things that will surprise you
+
+**"Google hasn't verified this app."** `drive.appdata` is a sensitive scope, so
+until you submit for Google verification you'll see an interstitial — click
+*Advanced → Go to \<app\> (unsafe)* to continue. It's a review process, not a
+defect, and it doesn't affect guest mode. Verification is only worth doing if
+you intend to share the app publicly.
+
+**"Google rejected this site's origin."** This means the origin you're loading
+from isn't in the list from step 4. The app's error message tells you the exact
+string to paste, and the Settings page shows your current origin. The usual
+culprits are a trailing slash, `http` vs `https`, or a missing port.
+
+### 2b. Refreshing the data
+
+The search index is a static build artefact, so "refreshing" means rebuilding
+and redeploying it. You never have to do this by hand — but here's every lever:
+
+| How | What it does |
+| --- | --- |
+| **Automatic, every 6 hours** | The `deploy.yml` cron harvests what changed, rebuilds and redeploys |
+| **Push to `main`** | Same |
+| **Actions → *Build index and deploy to Pages* → Run workflow** | Refresh right now |
+| Same, ticking **full_harvest** | Ignores the saved watermark and re-harvests the whole window |
+| `npm run refresh` (local) | Rebuilds `public/data/` for `npm run dev` |
+
+**How to tell it worked:** open **Settings → Search index** in the app. It shows
+when the index was last built, how many papers it holds, the date range covered
+and the categories included. If the last build is more than 12 hours old, it
+says so — that usually means the scheduled workflow is disabled or failing.
+
+Incremental runs are quick because `scripts/harvest.mjs` records a per-category
+datestamp watermark in `.corpus/state.json` and passes it to arXiv as `from=`,
+so each run only fetches what changed since.
+
+> **Editing `config/corpus.json` forces one long rebuild.** The CI cache is keyed
+> on that file's contents, so changing categories or the history window discards
+> the cached corpus and re-harvests from scratch — around 90 minutes for the
+> default scope. Subsequent runs go back to being incremental.
 
 ### 3. Tune the corpus (optional)
 
@@ -139,13 +204,39 @@ bundle by design, which is why it's a *variable* rather than a secret.
 | `abstractWindowMonths` | How far back abstracts are indexed for full-text search. Abstracts dominate the size budget |
 | `docsPerChunk` | Papers per display chunk. Smaller = less fetched per result page |
 
-Papers older than `abstractWindowMonths` remain searchable by title, author and
-category, and their abstract still loads when opened.
+The default scope is **core AI** — `cs.AI`, `cs.LG`, `cs.CL`, `cs.CV`, `cs.NE`,
+`stat.ML` — over the last five years. Roughly **424,000 papers, ~414 MB**.
 
-**Sizing** (measured, 63,570 papers → 56 MB): expect roughly **250–300 MB** for
-a 2018-onward corpus of ~350k papers. GitHub Pages' documented soft limits are
-1 GB per site and 100 GB/month of bandwidth, so keep an eye on `historyStart` if
-you widen the categories a lot.
+#### Why not just `cs.AI`?
+
+Because arXiv authors tag inconsistently, and indexing `cs.AI` alone would quietly
+lose most of the canon. Checked against the live API:
+
+| Paper | Categories | `cs.AI`? |
+| --- | --- | --- |
+| Attention Is All You Need | cs.CL, cs.LG | ✗ |
+| BERT | cs.CL | ✗ |
+| GPT-3 | cs.CL | ✗ |
+| ResNet | cs.CV | ✗ |
+| GANs | stat.ML, cs.LG | ✗ |
+| LLaMA | cs.CL | ✗ |
+| DQN / Atari | cs.LG | ✗ |
+| Vision Transformer | cs.CV, cs.AI, cs.LG | ✓ |
+
+Only ~41% of AI papers carry a `cs.AI` tag at all. The six-category scope keeps
+the field intact while dropping the adjacent areas — robotics (`cs.RO`),
+information retrieval (`cs.IR`), multiagent systems (`cs.MA`) — that were the
+main source of off-topic results.
+
+Note that `historyStart` is passed to OAI-PMH as `from`, which filters on
+**modification** date rather than submission date. Papers first published before
+the window but revised inside it come along too — free extra coverage of work
+that's still active.
+
+**Sizing** (measured from a real 63,570-paper build: 86 B light + 598 B abstract
++ 293 B index per paper, gzipped). GitHub Pages' documented soft limits are 1 GB
+per site and 100 GB/month of bandwidth. Shrink `abstractWindowMonths` first if
+you outgrow it — abstracts are ~60% of the bytes.
 
 ---
 
@@ -155,7 +246,8 @@ you widen the categories a lot.
 npm install
 
 # Build a small local corpus first — the app needs an index to search.
-node scripts/harvest.mjs --from 2026-07-01 --sets cs:cs:AI
+# A full harvest takes ~75 minutes; this narrow slice takes about a minute.
+node scripts/harvest.mjs --from 2026-08-01 --sets cs:cs:AI
 npm run build:index
 
 npm run dev
@@ -166,9 +258,13 @@ npm run dev
 | `npm run dev` | Dev server |
 | `npm run build` | Typecheck and build to `dist/` |
 | `npm test` | Unit tests |
+| `npm run refresh` | Harvest + rebuild the index in one step |
 | `npm run harvest` | Incremental OAI-PMH harvest into `.corpus/` |
 | `npm run build:index` | Compile `.corpus/` into `public/data/` |
 | `node e2e/reader.mjs` | Browser tests against a running preview |
+
+Useful `harvest.mjs` flags: `--from <date>` and `--sets <oai:set,...>` to narrow
+a run, `--max-pages N` to bound it, and `--full` to ignore the saved watermark.
 
 `.corpus/` and `public/data/` are generated and gitignored — CI rebuilds them
 and ships them as a Pages artifact, so refreshing the index never bloats git

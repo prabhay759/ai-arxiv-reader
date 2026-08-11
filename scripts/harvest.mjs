@@ -88,10 +88,14 @@ async function main() {
     console.log(`${count} records`)
   }
 
-  await writeCorpus(papers)
+  const kept = await writeCorpus(papers, new Set(config.categories))
   await fs.writeFile(STATE_FILE, JSON.stringify(nextState, null, 2))
 
-  console.log(`\nFetched ${fetched} records; corpus now holds ${papers.size} papers.`)
+  const dropped = papers.size - kept
+  console.log(`\nFetched ${fetched} records; corpus now holds ${kept} papers.`)
+  if (dropped > 0) {
+    console.log(`  (dropped ${dropped} outside the configured categories)`)
+  }
   console.log(`Corpus: ${CORPUS_FILE}`)
 }
 
@@ -142,7 +146,12 @@ async function fetchWithRetry(url) {
 
       if (res.status === 503) {
         const wait = Number(res.headers.get('retry-after') ?? 20)
-        await sleep((Number.isFinite(wait) ? wait : 20) * 1000)
+        const seconds = Number.isFinite(wait) ? wait : 20
+        // Say so out loud. arXiv throttles heavy harvesters and can ask for
+        // minutes at a time; a silent wait is indistinguishable from a hang,
+        // and someone watching would reasonably kill a run that is fine.
+        process.stdout.write(`\n    arXiv asked us to wait ${seconds}s (throttled), retrying... `)
+        await sleep(seconds * 1000)
         continue
       }
       // A resumption token that expired mid-harvest is unrecoverable; the next
@@ -154,7 +163,9 @@ async function fetchWithRetry(url) {
     } catch (err) {
       lastError = err
       if (err.message.startsWith('OAI rejected')) throw err
-      await sleep(2 ** attempt * 1000)
+      const backoff = 2 ** attempt
+      process.stdout.write(`\n    network error (${err.message}), retrying in ${backoff}s... `)
+      await sleep(backoff * 1000)
     }
   }
   throw lastError ?? new Error('exhausted retries')
@@ -274,15 +285,27 @@ async function loadCorpus() {
   return papers
 }
 
-async function writeCorpus(papers) {
+/**
+ * @param {Map<string, object>} papers
+ * @param {Set<string>} wanted configured categories; papers matching none are
+ *   dropped so the cached corpus doesn't accumulate categories we stopped
+ *   indexing. Safe to prune: narrowing the config invalidates the CI cache and
+ *   forces a fresh harvest, and widening it does the same.
+ * @returns {Promise<number>} papers actually written
+ */
+async function writeCorpus(papers, wanted) {
   // Write to a temp file and rename, so an interrupted run can't leave a
   // half-written corpus that the next run would silently treat as complete.
   // The pid keeps two concurrent harvests from racing on the same temp path —
   // without it, whichever renames second fails with ENOENT.
   const tmp = `${CORPUS_FILE}.${process.pid}.tmp`
   const out = createWriteStream(tmp)
+  let kept = 0
+
   for (const paper of papers.values()) {
     if (paper.deleted) continue
+    if (wanted.size > 0 && !paper.categories?.some((c) => wanted.has(c))) continue
+    kept += 1
     if (!out.write(`${JSON.stringify(paper)}\n`)) {
       await new Promise((resolve) => out.once('drain', resolve))
     }
@@ -292,6 +315,7 @@ async function writeCorpus(papers) {
     out.on('error', reject)
   })
   await fs.rename(tmp, CORPUS_FILE)
+  return kept
 }
 
 async function readJson(file, fallback) {

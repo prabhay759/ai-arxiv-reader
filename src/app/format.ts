@@ -62,17 +62,11 @@ export function cleanLatex(text: string): string {
     .trim()
 }
 
-export const PRIMARY_CATEGORIES = [
-  'cs.AI',
-  'cs.LG',
-  'cs.CL',
-  'cs.CV',
-  'cs.NE',
-  'cs.RO',
-  'cs.IR',
-  'cs.MA',
-  'stat.ML',
-]
+/**
+ * Fallback category list, used only until the manifest loads. The deployed
+ * index is the real source of truth — see useCorpusCategories().
+ */
+export const PRIMARY_CATEGORIES = ['cs.AI', 'cs.LG', 'cs.CL', 'cs.CV', 'cs.NE', 'stat.ML']
 
 export function formatDate(iso: string): string {
   if (!iso) return ''

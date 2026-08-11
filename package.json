@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "harvest": "node scripts/harvest.mjs",
-    "build:index": "node scripts/build-index.mjs",
+    "build:index": "node --max-old-space-size=6144 scripts/build-index.mjs",
+    "refresh": "npm run harvest && npm run build:index",
     "e2e": "node --test --test-concurrency=1 e2e/"
   },
   "dependencies": {

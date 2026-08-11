@@ -1,18 +1,13 @@
 {
-  "$comment": "Knobs for the CI data pipeline. Raising historyStart shrinks the site; lowering it widens coverage. abstractWindowMonths controls how far back full-text abstract search reaches (abstracts dominate the size budget).",
-  "categories": [
-    "cs.AI",
-    "cs.LG",
-    "cs.CL",
-    "cs.CV",
-    "cs.NE",
-    "cs.RO",
-    "cs.IR",
-    "cs.MA",
-    "stat.ML"
-  ],
-  "historyStart": "2018-01-01",
-  "abstractWindowMonths": 24,
+  "$comment": "Knobs for the CI data pipeline. Scope is core AI: the six categories where AI research actually lands. Robotics (cs.RO), information retrieval (cs.IR) and multiagent systems (cs.MA) are deliberately excluded — they were the main source of non-AI results. Note that cs.AI alone is NOT sufficient: arXiv authors tag inconsistently, and papers such as Attention Is All You Need (cs.CL, cs.LG), BERT (cs.CL) and ResNet (cs.CV) carry no cs.AI tag at all.",
+  "categories": ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"],
+
+  "$comment_historyStart": "Passed to OAI-PMH as `from`, which filters on MODIFICATION date rather than submission date. Papers first published earlier but revised since this date are therefore included too — free extra coverage of still-active work.",
+  "historyStart": "2021-08-01",
+
+  "$comment_abstractWindowMonths": "How far back abstracts are indexed for full-text search. Set wider than the history window so every abstract in the corpus is searchable and no cutoff notice is shown. Abstracts dominate the size budget, so shrink this first if the site outgrows GitHub Pages' 1 GB.",
+  "abstractWindowMonths": 72,
+
   "docsPerChunk": 512,
   "tokenShardPrefixLength": 2,
   "recentFeedSize": 200

@@ -194,11 +194,54 @@ const run = async () => {
     )
   })
 
+  await check('filter panel offers only categories the index actually contains', async () => {
+    // The list is read from the deployed manifest rather than a second
+    // hardcoded copy, so narrowing config/corpus.json cannot leave the panel
+    // offering categories that return nothing.
+    await page.goto(`${BASE}search`, { waitUntil: 'networkidle' })
+    await page.waitForSelector('input[type="checkbox"]', { timeout: 20000 })
+
+    const manifest = await page.evaluate(async (base) => {
+      const response = await fetch(`${base}data/manifest.json`)
+      return response.json()
+    }, BASE)
+
+    const offered = await page.locator('fieldset input[type="checkbox"] + span').allTextContents()
+    assert(
+      offered.length === manifest.categories.length,
+      `panel offers ${offered.length} categories, index has ${manifest.categories.length}`
+    )
+    for (const category of manifest.categories) {
+      assert(offered.includes(category), `panel is missing ${category}`)
+    }
+    for (const excluded of ['cs.RO', 'cs.IR', 'cs.MA']) {
+      assert(!offered.includes(excluded), `panel still offers de-scoped category ${excluded}`)
+    }
+  })
+
   await check('category filter narrows results', async () => {
+    await page.goto(`${BASE}search?cat=cs.CV&sort=newest`, { waitUntil: 'networkidle' })
+    await page.waitForSelector('h3 a', { timeout: 20000 })
+
+    // Every result must carry the filtered category, not merely some result.
+    const cards = await page.locator('.card').all()
+    let checked = 0
+    for (const card of cards.slice(0, 10)) {
+      const chips = await card.locator('.chip').allTextContents()
+      if (chips.length === 0) continue
+      assert(chips.some((c) => c.includes('cs.CV')), `a result lacks cs.CV: ${chips.join(',')}`)
+      checked += 1
+    }
+    assert(checked > 0, 'cs.CV filter produced no papers')
+  })
+
+  await check('a de-scoped category returns nothing', async () => {
+    // cs.RO is no longer harvested, so filtering on it must come back empty
+    // rather than silently showing unrelated papers.
     await page.goto(`${BASE}search?cat=cs.RO&sort=newest`, { waitUntil: 'networkidle' })
-    await page.waitForSelector('.chip', { timeout: 20000 })
-    const chips = await page.locator('.chip').allTextContents()
-    assert(chips.some((c) => c.includes('cs.RO')), 'cs.RO filter produced no cs.RO papers')
+    await page.waitForTimeout(2500)
+    const count = await page.locator('h3 a').count()
+    assert(count === 0, `cs.RO is out of scope but returned ${count} papers`)
   })
 
   await page.screenshot({ path: path.join(SHOTS, '02-search.png') })

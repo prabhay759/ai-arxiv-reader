@@ -27,7 +27,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Incremental refreshes take minutes, but a cold cache (first run, or any
+    # change to config/corpus.json) re-harvests the whole window — roughly 75
+    # minutes for the core-AI corpus, plus ~12 to build the index.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +61,7 @@ jobs:
         run: node scripts/harvest.mjs ${{ inputs.full_harvest && '--full' || '' }}
 
       - name: Build search index
-        run: node --max-old-space-size=6144 scripts/build-index.mjs
+        run: npm run build:index
 
       - name: Build site
         env:

@@ -3,7 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import type { PaperSummary } from '@/types'
 import { corpus } from '@/app/services'
-import { PRIMARY_CATEGORIES, categoryName, percentLabel } from '@/app/format'
+import { categoryName, percentLabel } from '@/app/format'
+import { useCorpusCategories } from '@/app/useManifest'
 import { EmptyState, ErrorNote, Spinner } from '@/components/EmptyState'
 import { PaperCard } from '@/components/PaperCard'
 import { continueReading } from '@/store/library'
@@ -12,6 +13,7 @@ import { db } from '@/store/db'
 export default function Home() {
   const [recent, setRecent] = useState<PaperSummary[]>()
   const [error, setError] = useState<string>()
+  const categories = useCorpusCategories()
 
   // Re-reads whenever progress changes, so finishing a paper drops it from
   // the shelf immediately.
@@ -81,7 +83,7 @@ export default function Home() {
           Browse by category
         </h2>
         <div className="flex flex-wrap gap-2">
-          {PRIMARY_CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <Link
               key={category}
               to={`/search?cat=${encodeURIComponent(category)}&sort=newest`}

@@ -99,11 +99,7 @@ async function ensureClient(): Promise<TokenClient> {
       pending = []
 
       if (response.error || !response.access_token) {
-        const message =
-          response.error === 'access_denied'
-            ? 'Google sign-in was cancelled.'
-            : (response.error_description ?? response.error ?? 'Google sign-in failed.')
-        waiting.forEach((p) => p.reject(new Error(message)))
+        waiting.forEach((p) => p.reject(explainAuthError(response.error, response.error_description)))
         return
       }
 
@@ -114,18 +110,63 @@ async function ensureClient(): Promise<TokenClient> {
     error_callback: (error) => {
       const waiting = pending
       pending = []
-      waiting.forEach((p) =>
-        p.reject(
-          new Error(
-            error.type === 'popup_closed'
-              ? 'Sign-in window was closed.'
-              : 'Google sign-in failed.'
-          )
-        )
-      )
+      waiting.forEach((p) => p.reject(explainAuthError(error.type)))
     },
   })
   return client
+}
+
+/**
+ * Turn Google's error codes into something a person can act on.
+ *
+ * This matters more than it looks. By far the most common setup mistake is
+ * forgetting to list the site's origin under "Authorised JavaScript origins",
+ * and Google reports that as `idpiframe_initialization_failed` or a bare
+ * "not allowed" — which tells the user nothing, and is invisible in the
+ * network tab because the failure happens inside Google's iframe. Naming the
+ * exact origin to paste turns a dead end into a one-line fix.
+ */
+export function explainAuthError(code?: string, description?: string): Error {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'this site'
+
+  switch (code) {
+    case 'access_denied':
+      return new Error('Google sign-in was cancelled.')
+
+    case 'popup_closed':
+    case 'popup_closed_by_user':
+      return new Error('The sign-in window was closed before finishing.')
+
+    case 'popup_failed_to_open':
+      return new Error('The browser blocked the sign-in window. Allow pop-ups for this site and try again.')
+
+    case 'idpiframe_initialization_failed':
+    case 'invalid_client':
+    case 'unauthorized_client':
+    case 'origin_mismatch':
+      return new Error(
+        `Google rejected this site's origin. Add exactly "${origin}" to ` +
+          '"Authorised JavaScript origins" on your OAuth client in the Google Cloud console, ' +
+          'then reload. (Origins must match scheme, host and port, with no trailing slash.)'
+      )
+
+    case 'admin_policy_enforced':
+      return new Error('Your Google Workspace administrator has blocked this app.')
+
+    default:
+      break
+  }
+
+  // Google sometimes puts the origin complaint in the description instead of
+  // using a distinct code, so check the text too before giving up.
+  if (description && /origin|redirect_uri/i.test(description)) {
+    return new Error(
+      `Google rejected this site's origin: ${description}. Add exactly "${origin}" to ` +
+        '"Authorised JavaScript origins" on your OAuth client.'
+    )
+  }
+
+  return new Error(description ?? code ?? 'Google sign-in failed.')
 }
 
 /**

@@ -89,7 +89,7 @@ export class SearchEngine {
         totalKnown: true,
         hasMore: false,
         tookMs: performance.now() - started,
-        ...this.notice(parsed, manifest.abstractCutoff),
+        ...this.notice(parsed, manifest.abstractCutoff, manifest.oldestPublished),
       }
     }
 
@@ -129,7 +129,7 @@ export class SearchEngine {
       totalKnown: scores.size <= MAX_CANDIDATES,
       hasMore: hits.length > offset + limit,
       tookMs: performance.now() - started,
-      ...this.notice(parsed, manifest.abstractCutoff),
+      ...this.notice(parsed, manifest.abstractCutoff, manifest.oldestPublished),
     }
   }
 
@@ -297,15 +297,27 @@ export class SearchEngine {
       totalKnown: exhausted,
       hasMore: hits.length > offset + limit,
       tookMs: performance.now() - started,
-      ...this.notice(parsed, manifest.abstractCutoff),
+      ...this.notice(parsed, manifest.abstractCutoff, manifest.oldestPublished),
     }
   }
 
-  private notice(parsed: ParsedQuery, cutoff: string): { notice?: string } {
+  /**
+   * Warn only when the abstract window actually excludes something. When the
+   * window reaches past the oldest paper in the corpus, every abstract is
+   * indexed and the warning would describe a limitation that doesn't exist.
+   */
+  private notice(
+    parsed: ParsedQuery,
+    cutoff: string,
+    oldestPublished: string
+  ): { notice?: string } {
+    if (!cutoff || cutoff <= oldestPublished) return {}
+
     const searchesAbstracts = parsed.terms.some(
       (t) => !t.negated && (t.fields === 0 || (t.fields & FIELD.ABSTRACT) !== 0)
     )
     if (!searchesAbstracts) return {}
+
     return {
       notice: `Abstract text is indexed from ${cutoff.slice(0, 7)} onward. Older papers are still searchable by title, author and category.`,
     }
