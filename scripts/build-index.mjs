@@ -113,7 +113,10 @@ async function main() {
   )
 
   console.log('Pass 3/3: building inverted index')
-  const batches = args.batches ?? Math.max(1, Math.ceil(docCount / 120_000))
+  // Smaller batches trade extra streaming passes over the corpus for a lower
+  // peak heap: postings for a quarter-million papers do not fit comfortably
+  // alongside the document table.
+  const batches = args.batches ?? Math.max(1, Math.ceil(docCount / 60_000))
   const { shards, indexBytes, termCount, postingCount } = await buildInvertedIndex({
     wanted,
     docIdById,

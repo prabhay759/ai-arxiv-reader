@@ -80,24 +80,53 @@ jobs:
       - run: npm run test
 
       # The harvested corpus is cached between runs so normal runs only fetch
-      # what changed. The key rotates daily so the cache is refreshed rather
-      # than growing stale; restore-keys falls back to the most recent one.
+      # what changed. restore-keys falls back to the most recent cache for the
+      # current corpus config; changing that config deliberately misses.
+      #
+      # Deliberately restore/save rather than actions/cache: the combined
+      # action only saves in a post-step that runs on success, so a failed
+      # harvest discarded every record it had already fetched. The save below
+      # runs with `if: always()`, which is what makes a re-run resume instead
+      # of starting from nothing.
       - name: Restore harvested corpus
         id: corpus-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .corpus
           key: arxiv-corpus-${{ hashFiles('config/corpus.json') }}-${{ github.run_id }}
           restore-keys: |
             arxiv-corpus-${{ hashFiles('config/corpus.json') }}-
 
-      # A cold cache means a full harvest from config.historyStart — roughly 75
-      # minutes, and longer when arXiv is throttling. The harvester checkpoints
-      # after each category, so if this step is cut short by the timeout, simply
-      # re-running the workflow resumes rather than starting over. Warm runs
-      # finish in seconds.
+      # A cold cache means a full harvest from config.historyStart — over an
+      # hour, and longer when arXiv is throttling. The harvester streams records
+      # to disk and records a watermark after each category, so a run cut short
+      # by the timeout resumes where it stopped when re-run. Warm runs finish in
+      # seconds.
+      #
+      # Heap headroom: the harvest itself is streaming, but arXiv responses are
+      # parsed a page at a time and the default heap is only ~4 GB.
       - name: Harvest arXiv metadata
-        run: node scripts/harvest.mjs ${{ inputs.full_harvest && '--full' || '' }}
+        run: node --max-old-space-size=8192 scripts/harvest.mjs ${{ inputs.full_harvest && '--full' || '' }}
+
+      - name: Check for a harvested corpus
+        id: corpus-check
+        if: always()
+        run: |
+          if [ -s .corpus/corpus.jsonl ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Corpus on disk: $(wc -l < .corpus/corpus.jsonl) records, $(du -h .corpus/corpus.jsonl | cut -f1)"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always save what was fetched, including after a failed or timed-out
+      # harvest — that partial corpus is exactly what lets the next run resume.
+      - name: Save harvested corpus
+        if: always() && steps.corpus-check.outputs.exists == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .corpus
+          key: arxiv-corpus-${{ hashFiles('config/corpus.json') }}-${{ github.run_id }}
 
       - name: Build search index
         run: npm run build:index

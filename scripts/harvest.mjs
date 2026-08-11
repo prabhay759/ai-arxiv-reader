@@ -51,74 +51,70 @@ async function main() {
 
   console.log(`Harvesting ${sets.length} set(s) from ${OAI_ENDPOINT}`)
 
-  // Load the existing corpus so we can merge by id: a paper cross-listed in
-  // several categories arrives once per set, and revised papers arrive again
-  // with a newer datestamp. Last write wins.
-  const papers = await loadCorpus()
-  console.log(`  existing corpus: ${papers.size} papers`)
-
   let fetched = 0
   const nextState = { ...state }
   const wanted = new Set(config.categories)
 
-  for (const set of sets) {
-    const from = args.from ?? state[set] ?? config.historyStart
-    process.stdout.write(`  ${set.padEnd(14)} from ${from ?? 'beginning'} ... `)
+  // Records are appended straight to disk as they arrive, never accumulated.
+  // Holding them in a Map is what a full harvest cannot afford: 456,000
+  // records was enough to exhaust Node's default ~4 GB heap and abort the run
+  // (exit 134) after two and a half hours of fetching. Duplicates from
+  // cross-listing and revisions are resolved by compactCorpus() at the end,
+  // which streams and keeps only ids in memory.
+  const out = createWriteStream(CORPUS_FILE, { flags: 'a' })
 
-    let count = 0
-    let newestDatestamp = from
-    try {
-      for await (const record of listRecords({ set, from, until: args.until })) {
-        papers.set(record.id, record)
-        count += 1
-        if (!newestDatestamp || record.datestamp > newestDatestamp) {
-          newestDatestamp = record.datestamp
+  try {
+    for (const set of sets) {
+      const from = args.from ?? state[set] ?? config.historyStart
+      process.stdout.write(`  ${set.padEnd(14)} from ${from ?? 'beginning'} ... `)
+
+      let count = 0
+      let newestDatestamp = from
+      try {
+        for await (const record of listRecords({ set, from, until: args.until })) {
+          await writeLine(out, `${JSON.stringify(record)}\n`)
+          count += 1
+          if (!newestDatestamp || record.datestamp > newestDatestamp) {
+            newestDatestamp = record.datestamp
+          }
         }
+      } catch (err) {
+        // One bad set shouldn't discard the whole harvest — keep what we have,
+        // leave that set's watermark untouched so the next run retries it.
+        console.log(`error: ${err.message}`)
+        continue
       }
-    } catch (err) {
-      // One bad set shouldn't discard the whole harvest — keep what we have,
-      // leave that set's watermark untouched so the next run retries it.
-      console.log(`error: ${err.message}`)
-      continue
+
+      fetched += count
+      // Re-harvest the watermark day next time: OAI datestamps are day-granular,
+      // so records added later on the same day would otherwise be missed.
+      nextState[set] = newestDatestamp ?? from
+      console.log(`${count} records`)
+
+      // Checkpoint after every completed set. A first harvest of the full
+      // history runs for hours, and without this a crash or timeout would
+      // throw away everything fetched so far; re-running resumes at the first
+      // unfinished set. The records are already on disk, so this only has to
+      // flush and record the watermark.
+      //
+      // Per-set is the correct granularity: records within a set do not arrive
+      // in datestamp order, so saving a partial watermark mid-set would skip
+      // the records still to come with earlier datestamps.
+      await flush(out)
+      await fs.writeFile(STATE_FILE, JSON.stringify(nextState, null, 2))
     }
-
-    fetched += count
-    // Re-harvest the watermark day next time: OAI datestamps are day-granular,
-    // so records added later on the same day would otherwise be missed.
-    nextState[set] = newestDatestamp ?? from
-    console.log(`${count} records`)
-
-    // Checkpoint after every completed set. A first harvest of the full
-    // history can run for hours — longer still when arXiv is throttling — and
-    // without this a CI timeout or a Ctrl-C would throw away everything
-    // fetched so far. Re-running then resumes at the first unfinished set.
-    //
-    // Per-set is the correct granularity: records within a set do not arrive
-    // in datestamp order, so saving a partial watermark mid-set would skip
-    // the records still to come with earlier datestamps.
-    await checkpoint(papers, wanted, nextState)
+  } finally {
+    await closeStream(out)
   }
 
-  const kept = await writeCorpus(papers, wanted)
+  const { kept, dropped } = await compactCorpus(wanted)
   await fs.writeFile(STATE_FILE, JSON.stringify(nextState, null, 2))
 
-  const dropped = papers.size - kept
   console.log(`\nFetched ${fetched} records; corpus now holds ${kept} papers.`)
   if (dropped > 0) {
-    console.log(`  (dropped ${dropped} outside the configured categories)`)
+    console.log(`  (dropped ${dropped} duplicate, deleted or out-of-scope records)`)
   }
   console.log(`Corpus: ${CORPUS_FILE}`)
-}
-
-/** Persist progress so an interrupted harvest resumes instead of restarting. */
-async function checkpoint(papers, wanted, state) {
-  try {
-    await writeCorpus(papers, wanted)
-    await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2))
-  } catch (err) {
-    // A failed checkpoint must not abort a harvest that is otherwise working.
-    console.log(`    (checkpoint failed: ${err.message})`)
-  }
 }
 
 /** cs.AI -> cs:cs:AI, stat.ML -> stat:stat:ML */
@@ -168,7 +164,10 @@ async function fetchWithRetry(url) {
 
       if (res.status === 503) {
         const wait = Number(res.headers.get('retry-after') ?? 20)
-        const seconds = Number.isFinite(wait) ? wait : 20
+        // arXiv sometimes answers 503 with `Retry-After: 0`, which taken
+        // literally is a hot retry loop against a service already telling us
+        // it is overloaded. Honour the value but never go below a floor.
+        const seconds = Math.max(Number.isFinite(wait) ? wait : 20, 5)
         // Say so out loud. arXiv throttles heavy harvesters and can ask for
         // minutes at a time; a silent wait is indistinguishable from a hang,
         // and someone watching would reasonably kill a run that is fine.
@@ -283,61 +282,111 @@ function collapse(text) {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-async function loadCorpus() {
-  const papers = new Map()
-  try {
-    await fs.access(CORPUS_FILE)
-  } catch {
-    return papers
+/** Backpressure-aware write. */
+async function writeLine(stream, text) {
+  if (!stream.write(text)) {
+    await new Promise((resolve) => stream.once('drain', resolve))
   }
+}
 
+function flush(stream) {
+  return new Promise((resolve) => {
+    if (typeof stream.flush === 'function') stream.flush()
+    // A write stream has no explicit fsync; a zero-length write resolves once
+    // everything queued ahead of it has been handed to the OS.
+    stream.write('', () => resolve())
+  })
+}
+
+function closeStream(stream) {
+  return new Promise((resolve, reject) => {
+    stream.end(resolve)
+    stream.on('error', reject)
+  })
+}
+
+/** Cheap id extraction — records are written with "id" first. */
+function quickId(line) {
+  const match = /^\{"id":"([^"]+)"/.exec(line)
+  if (match) return match[1]
+  try {
+    return JSON.parse(line).id ?? null
+  } catch {
+    return null
+  }
+}
+
+async function* corpusLines() {
   const rl = readline.createInterface({
     input: createReadStream(CORPUS_FILE),
     crlfDelay: Infinity,
   })
   for await (const line of rl) {
-    if (!line) continue
-    try {
-      const paper = JSON.parse(line)
-      papers.set(paper.id, paper)
-    } catch {
-      // Truncated final line from an interrupted run: skip it.
-    }
+    if (line) yield line
   }
-  return papers
 }
 
 /**
- * @param {Map<string, object>} papers
- * @param {Set<string>} wanted configured categories; papers matching none are
- *   dropped so the cached corpus doesn't accumulate categories we stopped
- *   indexing. Safe to prune: narrowing the config invalidates the CI cache and
- *   forces a fresh harvest, and widening it does the same.
- * @returns {Promise<number>} papers actually written
+ * Resolve the append-only corpus into one record per paper.
+ *
+ * The harvest appends blindly, so the file holds duplicates: a paper
+ * cross-listed in several categories arrives once per set, and a revised paper
+ * arrives again with a newer datestamp. The last occurrence is the freshest,
+ * so that is the one kept.
+ *
+ * Two streaming passes rather than loading the corpus: the first records which
+ * line wins for each id, the second copies just those lines out. Memory is one
+ * id plus a line number per paper (tens of MB at 400k papers) instead of the
+ * full records (gigabytes) — which is precisely what made the previous version
+ * run out of heap.
+ *
+ * @param {Set<string>} wanted configured categories; records matching none are
+ *   dropped so the cached corpus doesn't accumulate categories we no longer
+ *   index. Safe to prune: changing the config invalidates the CI cache anyway.
  */
-async function writeCorpus(papers, wanted) {
-  // Write to a temp file and rename, so an interrupted run can't leave a
-  // half-written corpus that the next run would silently treat as complete.
-  // The pid keeps two concurrent harvests from racing on the same temp path —
-  // without it, whichever renames second fails with ENOENT.
+async function compactCorpus(wanted) {
+  try {
+    await fs.access(CORPUS_FILE)
+  } catch {
+    return { kept: 0, dropped: 0 }
+  }
+
+  const winner = new Map()
+  let lineNumber = 0
+  for await (const line of corpusLines()) {
+    const id = quickId(line)
+    if (id) winner.set(id, lineNumber)
+    lineNumber += 1
+  }
+
   const tmp = `${CORPUS_FILE}.${process.pid}.tmp`
   const out = createWriteStream(tmp)
   let kept = 0
+  let index = 0
 
-  for (const paper of papers.values()) {
-    if (paper.deleted) continue
-    if (wanted.size > 0 && !paper.categories?.some((c) => wanted.has(c))) continue
-    kept += 1
-    if (!out.write(`${JSON.stringify(paper)}\n`)) {
-      await new Promise((resolve) => out.once('drain', resolve))
+  for await (const line of corpusLines()) {
+    const current = index
+    index += 1
+
+    const id = quickId(line)
+    if (!id || winner.get(id) !== current) continue
+
+    let record
+    try {
+      record = JSON.parse(line)
+    } catch {
+      continue // truncated line from an interrupted run
     }
+    if (record.deleted) continue
+    if (wanted.size > 0 && !record.categories?.some((c) => wanted.has(c))) continue
+
+    kept += 1
+    await writeLine(out, `${line}\n`)
   }
-  await new Promise((resolve, reject) => {
-    out.end(resolve)
-    out.on('error', reject)
-  })
+
+  await closeStream(out)
   await fs.rename(tmp, CORPUS_FILE)
-  return kept
+  return { kept, dropped: lineNumber - kept }
 }
 
 async function readJson(file, fallback) {
