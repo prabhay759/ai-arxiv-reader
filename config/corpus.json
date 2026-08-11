@@ -5,8 +5,8 @@
   "$comment_historyStart": "Passed to OAI-PMH as `from`, which filters on MODIFICATION date rather than submission date. Papers first published earlier but revised since this date are therefore included too — free extra coverage of still-active work.",
   "historyStart": "2021-08-01",
 
-  "$comment_abstractWindowMonths": "How far back abstracts are indexed for full-text search. Set wider than the history window so every abstract in the corpus is searchable and no cutoff notice is shown. Abstracts dominate the size budget, so shrink this first if the site outgrows GitHub Pages' 1 GB.",
-  "abstractWindowMonths": 72,
+  "$comment_abstractWindowMonths": "How far back abstracts are indexed for full-text search. null means no limit, so every abstract in the corpus is searchable. Abstracts dominate the size budget — set a number of months here first if the site outgrows GitHub Pages' 1 GB; papers outside the window stay searchable by title, author and category.",
+  "abstractWindowMonths": null,
 
   "docsPerChunk": 512,
   "tokenShardPrefixLength": 2,

@@ -235,13 +235,32 @@ const run = async () => {
     assert(checked > 0, 'cs.CV filter produced no papers')
   })
 
-  await check('a de-scoped category returns nothing', async () => {
-    // cs.RO is no longer harvested, so filtering on it must come back empty
-    // rather than silently showing unrelated papers.
+  await check('every indexed paper carries a configured category', async () => {
+    // The real scoping invariant. A de-scoped category like cs.RO is not
+    // *absent* from results — an AI paper cross-listed to robotics keeps that
+    // tag and should — but no paper may appear whose ONLY categories are
+    // outside the configured set. That would mean the harvest leaked.
     await page.goto(`${BASE}search?cat=cs.RO&sort=newest`, { waitUntil: 'networkidle' })
-    await page.waitForTimeout(2500)
-    const count = await page.locator('h3 a').count()
-    assert(count === 0, `cs.RO is out of scope but returned ${count} papers`)
+    await page.waitForTimeout(2000)
+
+    const manifest = await page.evaluate(async (base) => {
+      const response = await fetch(`${base}data/manifest.json`)
+      return response.json()
+    }, BASE)
+    const configured = new Set(manifest.categories)
+
+    const cards = await page.locator('.card').all()
+    let checked = 0
+    for (const card of cards.slice(0, 15)) {
+      const chips = (await card.locator('.chip').allTextContents()).map((c) => c.trim())
+      if (chips.length === 0) continue
+      assert(
+        chips.some((c) => configured.has(c)),
+        `a result carries no configured category: ${chips.join(', ')}`
+      )
+      checked += 1
+    }
+    assert(checked > 0, 'no cross-listed papers found to check')
   })
 
   await page.screenshot({ path: path.join(SHOTS, '02-search.png') })

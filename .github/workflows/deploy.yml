@@ -55,8 +55,11 @@ jobs:
           restore-keys: |
             arxiv-corpus-${{ hashFiles('config/corpus.json') }}-
 
-      # A cold cache means a full harvest from config.historyStart, which takes
-      # roughly half an hour. Warm runs finish in seconds.
+      # A cold cache means a full harvest from config.historyStart — roughly 75
+      # minutes, and longer when arXiv is throttling. The harvester checkpoints
+      # after each category, so if this step is cut short by the timeout, simply
+      # re-running the workflow resumes rather than starting over. Warm runs
+      # finish in seconds.
       - name: Harvest arXiv metadata
         run: node scripts/harvest.mjs ${{ inputs.full_harvest && '--full' || '' }}
 

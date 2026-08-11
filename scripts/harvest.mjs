@@ -59,6 +59,7 @@ async function main() {
 
   let fetched = 0
   const nextState = { ...state }
+  const wanted = new Set(config.categories)
 
   for (const set of sets) {
     const from = args.from ?? state[set] ?? config.historyStart
@@ -86,9 +87,19 @@ async function main() {
     // so records added later on the same day would otherwise be missed.
     nextState[set] = newestDatestamp ?? from
     console.log(`${count} records`)
+
+    // Checkpoint after every completed set. A first harvest of the full
+    // history can run for hours — longer still when arXiv is throttling — and
+    // without this a CI timeout or a Ctrl-C would throw away everything
+    // fetched so far. Re-running then resumes at the first unfinished set.
+    //
+    // Per-set is the correct granularity: records within a set do not arrive
+    // in datestamp order, so saving a partial watermark mid-set would skip
+    // the records still to come with earlier datestamps.
+    await checkpoint(papers, wanted, nextState)
   }
 
-  const kept = await writeCorpus(papers, new Set(config.categories))
+  const kept = await writeCorpus(papers, wanted)
   await fs.writeFile(STATE_FILE, JSON.stringify(nextState, null, 2))
 
   const dropped = papers.size - kept
@@ -97,6 +108,17 @@ async function main() {
     console.log(`  (dropped ${dropped} outside the configured categories)`)
   }
   console.log(`Corpus: ${CORPUS_FILE}`)
+}
+
+/** Persist progress so an interrupted harvest resumes instead of restarting. */
+async function checkpoint(papers, wanted, state) {
+  try {
+    await writeCorpus(papers, wanted)
+    await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2))
+  } catch (err) {
+    // A failed checkpoint must not abort a harvest that is otherwise working.
+    console.log(`    (checkpoint failed: ${err.message})`)
+  }
 }
 
 /** cs.AI -> cs:cs:AI, stat.ML -> stat:stat:ML */

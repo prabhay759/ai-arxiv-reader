@@ -81,13 +81,22 @@ async function main() {
     [FIELD.ABSTRACT]: scan.totalLengths.abstract / Math.max(1, scan.abstractDocs) || 1,
   }
 
-  // Abstracts are the bulk of the index; only the recent window gets them
-  // indexed for full-text search. Older papers stay searchable by title,
-  // author and category, and their abstract still loads when opened.
-  const abstractCutoff = monthsBefore(scan.newestPublished, config.abstractWindowMonths ?? 24)
+  // Abstracts are the bulk of the index, so they can be limited to a recent
+  // window; older papers then stay searchable by title, author and category,
+  // and their abstract still loads when opened.
+  //
+  // `abstractWindowMonths: null` means no limit — every abstract is indexed.
+  // An empty cutoff compares <= every date, which both the filter below and
+  // the client's "older abstracts aren't indexed" notice already treat as
+  // "nothing is excluded".
+  const abstractCutoff =
+    config.abstractWindowMonths == null
+      ? ''
+      : monthsBefore(scan.newestPublished, config.abstractWindowMonths)
+
   console.log(
     `  ${docCount} papers, ${scan.newestPublished} back to ${scan.oldestPublished}\n` +
-      `  abstracts indexed from ${abstractCutoff}`
+      `  abstracts indexed ${abstractCutoff ? `from ${abstractCutoff}` : 'for the whole corpus'}`
   )
 
   await fs.rm(OUT_DIR, { recursive: true, force: true })

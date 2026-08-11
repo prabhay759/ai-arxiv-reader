@@ -193,6 +193,13 @@ so each run only fetches what changed since.
 > the cached corpus and re-harvests from scratch — around 90 minutes for the
 > default scope. Subsequent runs go back to being incremental.
 
+**If the first run doesn't finish**, just run the workflow again. arXiv throttles
+heavy harvesters and can slow to tens of seconds per request, which is enough to
+push a full seeding harvest past the job timeout. The harvester checkpoints its
+corpus and watermark after every completed category, so a re-run resumes at the
+first unfinished one rather than starting over. Repeat until it completes; after
+that, refreshes are incremental and quick.
+
 ### 3. Tune the corpus (optional)
 
 `config/corpus.json` controls what gets indexed:
