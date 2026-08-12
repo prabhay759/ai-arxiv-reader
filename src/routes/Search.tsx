@@ -214,7 +214,9 @@ export default function Search() {
           </p>
         )}
 
-        {error && <ErrorNote message={error} onRetry={() => setParams(params)} />}
+        {error && (
+          <ErrorNote message={error} onRetry={() => setParams(params)} offerOfflineReset />
+        )}
 
         {!error && hits.length === 0 && !loading && (
           <EmptyState

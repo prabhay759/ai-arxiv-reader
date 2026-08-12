@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { resetOfflineCaches } from '@/app/resetOffline'
+
 export function EmptyState({
   title,
   description,
@@ -28,17 +31,53 @@ export function Spinner({ label = 'Loading' }: { label?: string }) {
   )
 }
 
-export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorNote({
+  message,
+  onRetry,
+  offerOfflineReset = false,
+}: {
+  message: string
+  onRetry?: () => void
+  /**
+   * Show the "clear offline data" escape hatch. Worth offering whenever the
+   * failure could be a stale service-worker cache rather than the site being
+   * down — reloading alone cannot fix that, because the worker answers the
+   * reload too.
+   */
+  offerOfflineReset?: boolean
+}) {
+  const [resetting, setResetting] = useState(false)
+
   return (
-    <div
-      role="alert"
-      className="card border-accent/40 bg-accent/5 p-4 text-sm"
-    >
+    <div role="alert" className="card border-accent/40 bg-accent/5 p-4 text-sm">
       <p className="text-ink">{message}</p>
-      {onRetry && (
-        <button type="button" className="btn mt-3" onClick={onRetry}>
-          Try again
-        </button>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {onRetry && (
+          <button type="button" className="btn" onClick={onRetry}>
+            Try again
+          </button>
+        )}
+        {offerOfflineReset && (
+          <button
+            type="button"
+            className="btn"
+            disabled={resetting}
+            onClick={() => {
+              setResetting(true)
+              void resetOfflineCaches()
+            }}
+          >
+            {resetting ? 'Clearing…' : 'Clear offline data and reload'}
+          </button>
+        )}
+      </div>
+
+      {offerOfflineReset && (
+        <p className="mt-2 text-xs text-faint">
+          Clearing removes only the cached copy of the paper index. Your library,
+          reading progress, highlights and notes stay on this device.
+        </p>
       )}
     </div>
   )

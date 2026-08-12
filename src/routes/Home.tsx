@@ -107,7 +107,7 @@ export default function Home() {
           </Link>
         </div>
 
-        {error && <ErrorNote message={error} />}
+        {error && <ErrorNote message={error} offerOfflineReset />}
 
         {!error && !recent && <Spinner label="Loading latest papers" />}
 
