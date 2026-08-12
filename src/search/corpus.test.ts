@@ -106,6 +106,51 @@ describe('manifest loading reports the real cause', () => {
   })
 })
 
+describe('an unreadable payload is not reported as a missing index', () => {
+  it('names what came back instead of blaming the build', async () => {
+    // The regression: assertJsonPayload threw IndexUnavailableError, and it
+    // runs on shards too — so an unreadable shard claimed the whole index had
+    // never been built, sending debugging the wrong way entirely.
+    stubFetch(() => new Response('<!doctype html><html>oops</html>', { status: 200 }))
+
+    const error = await new CorpusClient(BASE).manifest().catch((e: Error) => e)
+    expect(error).not.toBeInstanceOf(IndexUnavailableError)
+    expect((error as Error).message).toMatch(/HTML page/i)
+    expect((error as Error).message).toMatch(/manifest\.json/)
+  })
+
+  it('reports an empty response as empty', async () => {
+    stubFetch(() => new Response('', { status: 200 }))
+    const error = await new CorpusClient(BASE).manifest().catch((e: Error) => e)
+    expect((error as Error).message).toMatch(/empty response/i)
+  })
+})
+
+describe('gzip shards decode without DecompressionStream', () => {
+  it('falls back to a JS inflate when the browser lacks the API', async () => {
+    const { gzipSync } = await import('fflate')
+    const payload = gzipSync(new TextEncoder().encode(JSON.stringify({ transformer: [0, 1, 9] })))
+
+    stubFetch((url) =>
+      url.includes('manifest')
+        ? new Response(JSON.stringify(MANIFEST), { status: 200 })
+        : new Response(payload, { status: 200 })
+    )
+
+    // Simulate an older browser: Safari only gained DecompressionStream in
+    // 16.4, and without a fallback every shard read failed there.
+    const original = globalThis.DecompressionStream
+    // @ts-expect-error - deliberately removing the API for this test
+    delete globalThis.DecompressionStream
+    try {
+      const shard = await new CorpusClient(BASE).shard('tr')
+      expect(shard).toMatchObject({ transformer: [0, 1, 9] })
+    } finally {
+      globalThis.DecompressionStream = original
+    }
+  })
+})
+
 describe('shard loading distinguishes missing from broken', () => {
   it('treats 404 as "no papers use this term"', async () => {
     stubFetch((url) =>

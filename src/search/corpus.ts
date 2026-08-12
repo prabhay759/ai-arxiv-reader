@@ -53,6 +53,30 @@ const GZIP_MAGIC = [0x1f, 0x8b]
  * that header, in which case fetch already decompressed the body. Sniffing the
  * gzip magic bytes handles both without needing to know which host we're on.
  */
+/**
+ * Decompress a gzipped shard.
+ *
+ * DecompressionStream is the cheap path and is used where available (Chrome
+ * 80+, Firefox 113+, Safari 16.4+). Older browsers fall back to a JS inflate
+ * so the app still works rather than reporting a corrupt index — the failure
+ * mode this replaces was indistinguishable, to the reader, from the corpus
+ * being missing.
+ */
+async function gunzip(buffer: ArrayBuffer): Promise<string> {
+  if (typeof DecompressionStream !== 'undefined') {
+    try {
+      return await new Response(
+        new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'))
+      ).text()
+    } catch {
+      // Fall through to the JS implementation rather than failing outright.
+    }
+  }
+
+  const { gunzipSync } = await import('fflate')
+  return new TextDecoder().decode(gunzipSync(new Uint8Array(buffer)))
+}
+
 async function fetchShard<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal })
 
@@ -70,11 +94,15 @@ async function fetchShard<T>(url: string, signal?: AbortSignal): Promise<T> {
   const bytes = new Uint8Array(buffer)
   const isGzipped = bytes[0] === GZIP_MAGIC[0] && bytes[1] === GZIP_MAGIC[1]
 
-  const text = isGzipped
-    ? await new Response(
-        new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'))
-      ).text()
-    : new TextDecoder().decode(buffer)
+  let text: string
+  try {
+    text = isGzipped ? await gunzip(buffer) : new TextDecoder().decode(buffer)
+  } catch (error) {
+    throw new CorpusPayloadError(
+      url,
+      `could not be decompressed (${error instanceof Error ? error.message : 'unknown error'})`
+    )
+  }
 
   assertJsonPayload(text, url)
   return JSON.parse(text) as T
@@ -89,7 +117,33 @@ async function fetchShard<T>(url: string, signal?: AbortSignal): Promise<T> {
 function assertJsonPayload(text: string, url: string): void {
   const start = text.trimStart()[0]
   if (start === '{' || start === '[') return
-  throw new IndexUnavailableError(url)
+
+  // Deliberately NOT IndexUnavailableError. This function runs on every shard
+  // too, so reusing the "index has not been built" error here meant an
+  // unreadable *shard* was reported as a missing *index* — which sent
+  // debugging in entirely the wrong direction.
+  throw new CorpusPayloadError(
+    url,
+    `returned ${describePayload(text)} where JSON was expected`
+  )
+}
+
+function describePayload(text: string): string {
+  const head = text.trimStart().slice(0, 40)
+  if (/^<!doctype html|^<html/i.test(head)) return 'an HTML page'
+  if (head.length === 0) return 'an empty response'
+  return `unexpected content ("${head.replace(/\s+/g, ' ')}…")`
+}
+
+/** The file was reachable but its contents were not usable. */
+export class CorpusPayloadError extends Error {
+  constructor(
+    readonly url: string,
+    detail: string
+  ) {
+    super(`${url} ${detail}.`)
+    this.name = 'CorpusPayloadError'
+  }
 }
 
 export class IndexUnavailableError extends Error {
