@@ -13,11 +13,19 @@ on:
         type: boolean
         default: false
 
-# Let a running deploy finish rather than cancelling it — a half-deployed
-# Pages site would serve an index that does not match its manifest.
+# Newest run wins. This started as `cancel-in-progress: false` to protect a
+# deploy in flight, but that made a single wedged run block the group forever:
+# one scheduled run sat queued for over a day, and every refresh behind it was
+# evicted and cancelled, so the site silently stopped updating.
+#
+# Superseding is safe here. The corpus is checkpointed and saved with
+# `if: always()` (which covers cancellation), so an interrupted harvest loses
+# nothing, and publishing is atomic on Pages' side — there is no half-deployed
+# state to protect. A refresh that is already stale being replaced by a newer
+# one is exactly the behaviour we want.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
