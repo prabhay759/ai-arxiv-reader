@@ -5,7 +5,15 @@ import { fileURLToPath, URL } from 'node:url'
 
 // GitHub Pages serves project sites from /<repo>/. Override with BASE_PATH=/ for
 // custom domains or local static serving.
-const base = process.env.BASE_PATH ?? '/ai-arxiv-reader/'
+//
+// The trailing slash is enforced, not assumed. actions/configure-pages emits
+// base_path WITHOUT one ("/ai-arxiv-reader"), and Vite passes base through to
+// import.meta.env.BASE_URL verbatim, so `${BASE_URL}data/` silently became
+// "/ai-arxiv-readerdata/" — a 404 for every index file, while Vite's own asset
+// URLs kept working because it normalises those internally. The result was an
+// app that loaded perfectly and could not find a single paper.
+const rawBase = process.env.BASE_PATH?.trim() || '/ai-arxiv-reader/'
+const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
 
 export default defineConfig({
   base,

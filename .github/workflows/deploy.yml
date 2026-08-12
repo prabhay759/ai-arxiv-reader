@@ -148,6 +148,32 @@ jobs:
           BASE_PATH: ${{ vars.BASE_PATH || steps.pages.outputs.base_path }}
         run: npm run build
 
+      # A wrong base path does not fail the build — the app loads perfectly and
+      # simply 404s every index file, which is how "/ai-arxiv-readerdata/"
+      # reached production and looked like a missing corpus for hours.
+      - name: Verify the built app points at the real index
+        run: |
+          set -euo pipefail
+
+          # The index must actually be in the site.
+          test -f dist/data/manifest.json || {
+            echo "::error::dist/data/manifest.json is missing — the index was not built into the site"
+            exit 1
+          }
+
+          # Any data path baked into the bundle must be either a bare "data/"
+          # (joined with the base at runtime) or properly separated as
+          # ".../data/". A base path missing its trailing slash produces
+          # "<repo>data/", which is the failure this guards.
+          BAD=$(grep -ohaE '"[^"]*data/"' dist/assets/index-*.js \
+                | tr -d '"' | grep -Ev '^data/$|/data/$' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::malformed data path in the bundle: $BAD"
+            echo "This usually means BASE_PATH lost its trailing slash."
+            exit 1
+          fi
+          echo "data paths in bundle are well formed"
+
       - name: Report site size
         run: |
           echo "### Deployed site" >> "$GITHUB_STEP_SUMMARY"

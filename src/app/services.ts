@@ -5,7 +5,21 @@ import { SearchEngine } from '@/search/engine'
  * Shared singletons. The corpus client caches shards in memory for the
  * session, so it must be created once rather than per component.
  */
-export const DATA_BASE_URL = `${import.meta.env.BASE_URL}data/`
+/**
+ * Join a path onto the app's base URL with exactly one separator.
+ *
+ * BASE_URL is whatever the build was configured with, and a deploy that omits
+ * the trailing slash turns naive concatenation into a wrong path
+ * ("/ai-arxiv-reader" + "data/" = "/ai-arxiv-readerdata/"). The build now
+ * normalises it too; this is the second line of defence, because the failure
+ * is invisible until every data request 404s.
+ */
+export function withBase(path: string): string {
+  const base = import.meta.env.BASE_URL || '/'
+  return `${base.endsWith('/') ? base : `${base}/`}${path.replace(/^\//, '')}`
+}
+
+export const DATA_BASE_URL = withBase('data/')
 
 export const corpus = new CorpusClient(DATA_BASE_URL)
 export const searchEngine = new SearchEngine(corpus)
