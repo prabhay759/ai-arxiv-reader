@@ -55,7 +55,16 @@ const GZIP_MAGIC = [0x1f, 0x8b]
  */
 async function fetchShard<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal })
-  if (!response.ok) throw new ShardMissingError(url, response.status)
+
+  // Only 404 means the shard genuinely doesn't exist — no paper uses that
+  // term, or that month has no papers. Callers turn that into an empty
+  // result. Any other status is a transport or hosting failure, and must not
+  // be reported to the reader as "nothing matched": a 503 presented as zero
+  // results is a silent lie about the corpus.
+  if (response.status === 404) throw new ShardMissingError(url, 404)
+  if (!response.ok) {
+    throw new Error(`Could not load part of the search index (HTTP ${response.status}).`)
+  }
 
   const buffer = await response.arrayBuffer()
   const bytes = new Uint8Array(buffer)
@@ -122,20 +131,61 @@ export class CorpusClient {
 
   manifest(): Promise<Manifest> {
     if (!this.manifestPromise) {
-      this.manifestPromise = fetch(`${this.baseUrl}manifest.json`).then(async (response) => {
-        const url = `${this.baseUrl}manifest.json`
-        if (!response.ok) throw new IndexUnavailableError(url)
-
-        const text = await response.text()
-        assertJsonPayload(text, url)
-        return JSON.parse(text) as Manifest
-      })
+      this.manifestPromise = this.loadManifest()
       // A failed manifest must not be cached forever; let the next call retry.
       this.manifestPromise.catch(() => {
         this.manifestPromise = undefined
       })
     }
     return this.manifestPromise
+  }
+
+  /**
+   * Fetch the manifest, reporting *why* it failed rather than assuming.
+   *
+   * The manifest lives at a stable URL whose contents change with every
+   * deploy, so a stale copy — in the HTTP cache or held by a service worker
+   * from an earlier build — can wedge the app while the site itself is
+   * perfectly healthy. It is therefore fetched revalidated, and retried once
+   * with the cache fully bypassed before giving up.
+   */
+  private async loadManifest(): Promise<Manifest> {
+    const url = `${this.baseUrl}manifest.json`
+
+    for (const cache of ['no-cache', 'reload'] as RequestCache[]) {
+      let response: Response
+      try {
+        response = await fetch(url, { cache })
+      } catch {
+        if (cache === 'reload') {
+          throw new Error(
+            navigator.onLine === false
+              ? "You appear to be offline, and this index hasn't been cached on this device yet."
+              : 'Could not reach the search index. Check your connection and try again.'
+          )
+        }
+        continue
+      }
+
+      if (response.ok) {
+        const text = await response.text()
+        assertJsonPayload(text, url)
+        return JSON.parse(text) as Manifest
+      }
+
+      // 404 is the one status that actually means "no index deployed here".
+      // Everything else is a transport or hosting problem, and saying
+      // "run the build" would send the reader off fixing the wrong thing.
+      if (response.status === 404) throw new IndexUnavailableError(url)
+      if (cache === 'reload') {
+        throw new Error(
+          `The search index could not be loaded (HTTP ${response.status}). ` +
+            'This is usually temporary — try again in a moment.'
+        )
+      }
+    }
+
+    throw new IndexUnavailableError(url)
   }
 
   /** Returns null when the shard doesn't exist — i.e. no paper has that term. */

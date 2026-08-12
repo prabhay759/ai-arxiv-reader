@@ -1,0 +1,127 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CorpusClient, IndexUnavailableError } from './corpus'
+
+const BASE = 'https://example.test/data/'
+
+function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+  const spy = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+    Promise.resolve(handler(String(input), init))
+  )
+  vi.stubGlobal('fetch', spy)
+  return spy
+}
+
+const MANIFEST = {
+  schema: 1,
+  builtAt: '2026-08-12T15:25:29.700Z',
+  docCount: 3,
+  docsPerChunk: 512,
+  chunkCount: 1,
+  prefixLength: 2,
+  categories: ['cs.AI'],
+  abstractCutoff: '',
+  newestPublished: '2026-08-11',
+  oldestPublished: '2024-01-01',
+  avgFieldLengths: { title: 10, author: 5, category: 2, abstract: 100 },
+  shards: [],
+  metaShards: [],
+  idShards: [],
+  stats: { termCount: 1, postingCount: 1 },
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('manifest loading reports the real cause', () => {
+  it('loads a healthy manifest', async () => {
+    stubFetch(() => new Response(JSON.stringify(MANIFEST), { status: 200 }))
+    const manifest = await new CorpusClient(BASE).manifest()
+    expect(manifest.docCount).toBe(3)
+  })
+
+  it('only claims "not built" on a genuine 404', async () => {
+    stubFetch(() => new Response('nope', { status: 404 }))
+    await expect(new CorpusClient(BASE).manifest()).rejects.toBeInstanceOf(
+      IndexUnavailableError
+    )
+  })
+
+  it('does NOT tell the user to run a build when the server errors', async () => {
+    // The bug this guards: every non-OK response used to be reported as
+    // "the search index has not been built", sending the reader off to fix
+    // something that was not wrong.
+    stubFetch(() => new Response('bad gateway', { status: 502 }))
+
+    const error = await new CorpusClient(BASE).manifest().catch((e: Error) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(IndexUnavailableError)
+    expect((error as Error).message).toMatch(/502/)
+    expect((error as Error).message).not.toMatch(/has not been built/i)
+  })
+
+  it('retries once with the cache bypassed before giving up', async () => {
+    // A stale service-worker or HTTP cache entry can wedge the app while the
+    // site itself is healthy, so a failure must be retried unconditionally.
+    let call = 0
+    const spy = stubFetch(() => {
+      call += 1
+      return call === 1
+        ? new Response('stale', { status: 500 })
+        : new Response(JSON.stringify(MANIFEST), { status: 200 })
+    })
+
+    const manifest = await new CorpusClient(BASE).manifest()
+    expect(manifest.docCount).toBe(3)
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[0][1]).toMatchObject({ cache: 'no-cache' })
+    expect(spy.mock.calls[1][1]).toMatchObject({ cache: 'reload' })
+  })
+
+  it('explains an offline failure as offline', async () => {
+    vi.stubGlobal('navigator', { onLine: false })
+    stubFetch(() => {
+      throw new TypeError('Failed to fetch')
+    })
+
+    const error = await new CorpusClient(BASE).manifest().catch((e: Error) => e)
+    expect((error as Error).message).toMatch(/offline/i)
+  })
+
+  it('lets a later call retry after a failure', async () => {
+    // A 404 is definitive, so it short-circuits without the cache-bypass
+    // retry — one fetch, not two.
+    let call = 0
+    stubFetch(() => {
+      call += 1
+      return call === 1
+        ? new Response('nope', { status: 404 })
+        : new Response(JSON.stringify(MANIFEST), { status: 200 })
+    })
+
+    const client = new CorpusClient(BASE)
+    await expect(client.manifest()).rejects.toBeInstanceOf(IndexUnavailableError)
+    // The "Try again" button depends on the failed promise not being cached.
+    await expect(client.manifest()).resolves.toMatchObject({ docCount: 3 })
+  })
+})
+
+describe('shard loading distinguishes missing from broken', () => {
+  it('treats 404 as "no papers use this term"', async () => {
+    stubFetch((url) =>
+      url.includes('manifest')
+        ? new Response(JSON.stringify(MANIFEST), { status: 200 })
+        : new Response('nope', { status: 404 })
+    )
+    await expect(new CorpusClient(BASE).shard('zz')).resolves.toBeNull()
+  })
+
+  it('surfaces a server error instead of pretending nothing matched', async () => {
+    stubFetch((url) =>
+      url.includes('manifest')
+        ? new Response(JSON.stringify(MANIFEST), { status: 200 })
+        : new Response('boom', { status: 503 })
+    )
+    await expect(new CorpusClient(BASE).shard('tr')).rejects.toThrow(/503/)
+  })
+})
