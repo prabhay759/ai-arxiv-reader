@@ -199,6 +199,19 @@ Incremental runs are quick because `scripts/harvest.mjs` records a per-category
 datestamp watermark in `.corpus/state.json` and passes it to arXiv as `from=`,
 so each run only fetches what changed since.
 
+**Why it keeps running.** GitHub switches off scheduled workflows once a
+repository has gone 60 days without a commit, and a refresh that only reads
+arXiv and publishes to Pages never commits anything — so left alone this
+workflow would disable itself about two months after the last time anyone
+touched the code, and the site would silently freeze on whatever it had that
+day. The `keepalive` job prevents that: on a scheduled run, if `main` has been
+quiet for 21 days, it pushes a one-line timestamp to `.github/schedule-heartbeat`.
+That commit resets GitHub's clock. It is marked `[skip ci]` so it doesn't
+trigger a redundant deploy, and it never fires while you are actively working on
+the repository. It needs **Settings → Actions → General → Workflow permissions**
+set to **Read and write**; if it isn't, the job leaves instructions in the run
+summary rather than failing.
+
 > **Editing `config/corpus.json` forces one long rebuild.** The CI cache is keyed
 > on that file's contents, so changing categories or the history window discards
 > the cached corpus and re-harvests from scratch — around 90 minutes for the

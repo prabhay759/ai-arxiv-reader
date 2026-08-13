@@ -197,3 +197,68 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # GitHub disables scheduled workflows after 60 days without a commit to the
+  # repository, and a refresh that only reads arXiv and publishes to Pages
+  # produces no commits at all. Left alone, this workflow switches itself off
+  # roughly two months from the last time anyone touched the code, and the
+  # site quietly freezes on whatever papers it had that day.
+  #
+  # So: on scheduled runs, if the repository has gone quiet, push a one-line
+  # timestamp. That is a real commit, which resets GitHub's 60-day clock.
+  keepalive:
+    needs: deploy
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Reset the inactivity clock if the repository has gone quiet
+        run: |
+          set -euo pipefail
+
+          AGE_DAYS=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit to main: ${AGE_DAYS} days ago."
+
+          # Well inside the 60-day limit, and infrequent enough that the commit
+          # log stays readable — at most one stamp every three weeks, and none
+          # at all while anyone is actively working on the repository.
+          if [ "$AGE_DAYS" -lt 21 ]; then
+            echo "Recent enough; the schedule is in no danger. Nothing to do."
+            exit 0
+          fi
+
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > .github/schedule-heartbeat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/schedule-heartbeat
+
+          # [skip ci] matters: without it this push retriggers the workflow on
+          # `push: [main]`, and every heartbeat would cost a full deploy.
+          git commit -m 'chore: keep the arXiv refresh schedule alive [skip ci]'
+
+          if git push origin main; then
+            echo "Pushed a heartbeat commit; the schedule is safe for another 60 days."
+          else
+            # The only plausible cause is the repository's workflow token being
+            # read-only, which is a settings change no workflow can make for
+            # itself. Say exactly what to click rather than failing opaquely.
+            echo "::warning title=Could not refresh the schedule's inactivity clock::The refresh will stop running once the repository has been inactive for 60 days."
+            {
+              echo "## The refresh schedule needs a nudge"
+              echo
+              echo "This job tried to push a heartbeat commit and was refused, which"
+              echo "almost always means the workflow token is read-only."
+              echo
+              echo "1. Go to **Settings → Actions → General**"
+              echo "2. Under **Workflow permissions**, choose **Read and write permissions**"
+              echo "3. Save"
+              echo
+              echo "Until then, any commit you push to the repository resets the clock"
+              echo "by hand — and GitHub emails you before it disables the schedule."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
