@@ -151,6 +151,69 @@ describe('gzip shards decode without DecompressionStream', () => {
   })
 })
 
+describe('data files are stamped with the build they belong to', () => {
+  function stubShardFetch(manifest: typeof MANIFEST) {
+    return stubFetch((url) => {
+      if (url.includes('manifest')) {
+        return new Response(JSON.stringify(manifest), { status: 200 })
+      }
+      // docs/ and recent are arrays of summary tuples; the rest are maps.
+      const body = /docs\/|recent\./.test(url) ? [] : {}
+      return new Response(JSON.stringify(body), { status: 200 })
+    })
+  }
+
+  it('stamps every shard URL, but never the manifest', async () => {
+    const spy = stubShardFetch(MANIFEST)
+    const client = new CorpusClient(BASE)
+
+    await client.shard('tr')
+    await client.docChunk(0)
+    await client.recent()
+    await client.findById('2608.13560')
+    await client.detail({
+      id: '2608.13560',
+      title: 't',
+      authors: [],
+      categories: [],
+      published: '2026-08-13',
+    })
+
+    const urls = spy.mock.calls.map((call) => String(call[0]))
+    // 20260812152529700 — the manifest's builtAt with the punctuation stripped.
+    const stamp = '?v=20260812152529700'
+    expect(urls.filter((url) => url.includes('manifest.json'))).toEqual([
+      `${BASE}manifest.json`,
+    ])
+    for (const url of urls.filter((url) => !url.includes('manifest.json'))) {
+      expect(url).toContain(stamp)
+    }
+    expect(urls).toContain(`${BASE}index/tr.json.gz${stamp}`)
+    expect(urls).toContain(`${BASE}docs/0.json.gz${stamp}`)
+    expect(urls).toContain(`${BASE}recent.json.gz${stamp}`)
+    expect(urls).toContain(`${BASE}ids/2608.json.gz${stamp}`)
+    expect(urls).toContain(`${BASE}meta/202608.json.gz${stamp}`)
+  })
+
+  it('asks for different URLs after a rebuild', async () => {
+    // Why this matters beyond cache busting: doc ids are assigned newest-first,
+    // so one new paper renumbers the entire corpus. A posting list cached from
+    // an earlier build, resolved against a later build's doc chunks, returns
+    // the wrong papers with no error anywhere. Distinct URLs per build make
+    // that mixture impossible.
+    const first = stubShardFetch(MANIFEST)
+    await new CorpusClient(BASE).shard('tr')
+    const before = String(first.mock.calls.at(-1)?.[0])
+
+    const rebuilt = stubShardFetch({ ...MANIFEST, builtAt: '2026-08-16T13:28:14.651Z' })
+    await new CorpusClient(BASE).shard('tr')
+    const after = String(rebuilt.mock.calls.at(-1)?.[0])
+
+    expect(before).not.toBe(after)
+    expect(after).toBe(`${BASE}index/tr.json.gz?v=20260816132814651`)
+  })
+})
+
 describe('shard loading distinguishes missing from broken', () => {
   it('treats 404 as "no papers use this term"', async () => {
     stubFetch((url) =>

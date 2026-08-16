@@ -187,6 +187,26 @@ export class CorpusClient {
 
   constructor(private readonly baseUrl: string) {}
 
+  /**
+   * URL for a data file, stamped with the build it belongs to.
+   *
+   * Doc ids are assigned newest-first at build time, so a single new paper
+   * shifts every id in the corpus. That makes shards from two different builds
+   * mutually unreadable: a posting list from Tuesday's index resolved against
+   * Wednesday's doc chunks returns the wrong papers entirely — silently, with
+   * no error anywhere. Since the paths themselves are stable, the only thing
+   * separating one build's files from another's is this stamp.
+   *
+   * It doubles as cache busting. The service worker caches `/data/` files
+   * first-from-cache for 30 days, which is right for a file that never changes
+   * and wrong for one that changes every six hours; versioning the URL means a
+   * new build is simply a cache miss instead of something that has to expire.
+   */
+  private async versioned(path: string): Promise<string> {
+    const { builtAt } = await this.manifest()
+    return `${this.baseUrl}${path}?v=${builtAt.replace(/\D/g, '')}`
+  }
+
   manifest(): Promise<Manifest> {
     if (!this.manifestPromise) {
       this.manifestPromise = this.loadManifest()
@@ -250,13 +270,13 @@ export class CorpusClient {
   async shard(key: string, signal?: AbortSignal): Promise<IndexShard | null> {
     let pending = this.shards.get(key)
     if (!pending) {
-      pending = fetchShard<IndexShard>(`${this.baseUrl}index/${key}.json.gz`, signal).catch(
-        (error) => {
+      pending = this.versioned(`index/${key}.json.gz`)
+        .then((url) => fetchShard<IndexShard>(url, signal))
+        .catch((error) => {
           if (error instanceof ShardMissingError) return null
           this.shards.delete(key)
           throw error
-        }
-      )
+        })
       this.shards.set(key, pending)
     }
     return pending
@@ -265,10 +285,9 @@ export class CorpusClient {
   async docChunk(chunk: number, signal?: AbortSignal): Promise<PaperSummary[]> {
     let pending = this.docChunks.get(chunk)
     if (!pending) {
-      pending = fetchShard<SummaryTuple[]>(
-        `${this.baseUrl}docs/${chunk}.json.gz`,
-        signal
-      ).then((rows) => rows.map(toSummary))
+      pending = this.versioned(`docs/${chunk}.json.gz`)
+        .then((url) => fetchShard<SummaryTuple[]>(url, signal))
+        .then((rows) => rows.map(toSummary))
       pending.catch(() => this.docChunks.delete(chunk))
       this.docChunks.set(chunk, pending)
     }
@@ -307,14 +326,13 @@ export class CorpusClient {
     const month = summary.published.slice(0, 7).replace('-', '')
     let pending = this.metaShards.get(month)
     if (!pending) {
-      pending = fetchShard<Record<string, MetaEntry>>(
-        `${this.baseUrl}meta/${month}.json.gz`,
-        signal
-      ).catch((error) => {
-        if (error instanceof ShardMissingError) return null
-        this.metaShards.delete(month)
-        throw error
-      })
+      pending = this.versioned(`meta/${month}.json.gz`)
+        .then((url) => fetchShard<Record<string, MetaEntry>>(url, signal))
+        .catch((error) => {
+          if (error instanceof ShardMissingError) return null
+          this.metaShards.delete(month)
+          throw error
+        })
       this.metaShards.set(month, pending)
     }
 
@@ -340,14 +358,13 @@ export class CorpusClient {
 
     let pending = this.idShards.get(key)
     if (!pending) {
-      pending = fetchShard<Record<string, number>>(
-        `${this.baseUrl}ids/${key}.json.gz`,
-        signal
-      ).catch((error) => {
-        if (error instanceof ShardMissingError) return null
-        this.idShards.delete(key)
-        throw error
-      })
+      pending = this.versioned(`ids/${key}.json.gz`)
+        .then((url) => fetchShard<Record<string, number>>(url, signal))
+        .catch((error) => {
+          if (error instanceof ShardMissingError) return null
+          this.idShards.delete(key)
+          throw error
+        })
       this.idShards.set(key, pending)
     }
 
@@ -359,7 +376,10 @@ export class CorpusClient {
   }
 
   async recent(signal?: AbortSignal): Promise<PaperSummary[]> {
-    const rows = await fetchShard<SummaryTuple[]>(`${this.baseUrl}recent.json.gz`, signal)
+    const rows = await fetchShard<SummaryTuple[]>(
+      await this.versioned('recent.json.gz'),
+      signal
+    )
     return rows.map(toSummary)
   }
 }

@@ -74,8 +74,33 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/data\//, new RegExp(`^${base}data/`)],
         runtimeCaching: [
           {
-            // Search index + metadata shards: cache-first, they are immutable
-            // between deploys and this is what makes offline search work.
+            // The manifest MUST come before the /data/ rule below — Workbox
+            // takes the first matching route.
+            //
+            // It is the one data file whose URL is stable while its contents
+            // change every six hours, so serving it cache-first pinned every
+            // returning reader to whichever build they happened to visit on,
+            // for up to thirty days. The site refreshed on schedule and the
+            // browser never noticed: an index that looked frozen while
+            // everything upstream was healthy. Network-first fixes that and
+            // still falls back to the cached copy when offline, which is all
+            // the manifest was being cached for.
+            urlPattern: ({ url }) => url.pathname.endsWith('/data/manifest.json'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'corpus-manifest',
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Everything else under /data/ is cache-first, which is what makes
+            // offline search work. These files are NOT immutable — doc ids are
+            // assigned newest-first, so every build renumbers the whole corpus
+            // — but CorpusClient stamps each URL with the build it came from
+            // (see versioned()), so each build occupies its own URL space and
+            // a stale entry is never mixed into a fresh session's results.
             urlPattern: ({ url }) => url.pathname.includes('/data/'),
             handler: 'CacheFirst',
             options: {
