@@ -490,6 +490,98 @@ const run = async () => {
   await mobilePage.screenshot({ path: path.join(SHOTS, '08-mobile-reader.png') })
   await mobile.close()
 
+  // ------------------------------------------------------------- refresh
+  console.log('\nRefresh')
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  // Let the service worker take control, so the button exercises the path a
+  // returning reader actually hits rather than an uncontrolled first load.
+  await page.waitForTimeout(2500)
+
+  const refreshButton = () => page.getByRole('button', { name: 'Check for newer papers' })
+
+  await check('refresh button is present on every route', async () => {
+    await refreshButton().waitFor({ state: 'visible', timeout: 10000 })
+    await page.goto(`${BASE}library`, { waitUntil: 'domcontentloaded' })
+    await refreshButton().waitFor({ state: 'visible', timeout: 10000 })
+    await page.goto(BASE, { waitUntil: 'networkidle' })
+  })
+
+  await check('says so, without reloading, when the index has not moved', async () => {
+    await page.evaluate(() => {
+      window.__refreshMarker = true
+    })
+    await refreshButton().click()
+
+    await page.getByText('Already up to date', { exact: true }).waitFor({ timeout: 15000 })
+    // A reload would have cleared the marker. The point of this state is that
+    // it costs the reader nothing — no reload, no lost scroll position.
+    const survived = await page.evaluate(() => window.__refreshMarker === true)
+    assert(survived, 'page reloaded even though the index was unchanged')
+  })
+
+  // The two checks below need to answer the button's probe with something the
+  // real server would not send. Playwright cannot intercept a request a
+  // service worker makes on the page's behalf, and the manifest now goes
+  // through the worker's network-first route — so they run in a context with
+  // workers blocked. That leaves the button's own logic under test, which is
+  // what these are for; the worker's routing is asserted separately, against
+  // the built sw.js.
+  const isProbe = (url) =>
+    url.pathname.endsWith('/data/manifest.json') && url.search.startsWith('?t=')
+
+  const plain = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    serviceWorkers: 'block',
+  })
+  await relayArxivThroughNode(plain)
+  const plainPage = await plain.newPage()
+  const plainButton = () => plainPage.getByRole('button', { name: 'Check for newer papers' })
+
+  await check('reloads onto a newer index when one is published', async () => {
+    await plainPage.goto(BASE, { waitUntil: 'networkidle' })
+    const current = await plainPage.evaluate(async (base) => {
+      const response = await fetch(`${base}data/manifest.json`, { cache: 'reload' })
+      return response.json()
+    }, BASE)
+
+    // Stands in for a rebuild that landed after this tab was opened.
+    await plainPage.route(isProbe, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...current, builtAt: '2099-01-01T00:00:00.000Z' }),
+      })
+    )
+
+    try {
+      await plainPage.evaluate(() => {
+        window.__refreshMarker = true
+      })
+      await plainButton().click()
+      await plainPage.waitForFunction(() => window.__refreshMarker === undefined, {
+        timeout: 20000,
+      })
+    } finally {
+      await plainPage.unroute(isProbe)
+    }
+  })
+
+  await check('a failed check reports itself instead of looking idle', async () => {
+    await plainPage.goto(BASE, { waitUntil: 'networkidle' })
+    await plainPage.route(isProbe, (route) => route.fulfill({ status: 503, body: 'nope' }))
+
+    try {
+      await plainButton().click()
+      await plainPage
+        .getByText('Could not reach the index', { exact: true })
+        .waitFor({ timeout: 15000 })
+    } finally {
+      await plainPage.unroute(isProbe)
+    }
+  })
+
+  await plain.close()
+
   // ------------------------------------------------------------- offline
   console.log('\nOffline')
   await check('shell and library work with the network cut', async () => {

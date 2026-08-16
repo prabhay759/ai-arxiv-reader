@@ -4,6 +4,7 @@ import { applyReaderSettings, useAppStore } from '@/app/store'
 import { applyTheme, watchSystemTheme } from '@/app/theme'
 import { GlobalSearchBox } from './GlobalSearchBox'
 import { KeyboardShortcuts, useGlobalShortcuts } from './KeyboardShortcuts'
+import { RefreshButton } from './RefreshButton'
 import { SyncIndicator } from './SyncIndicator'
 import { UpdatePrompt } from './UpdatePrompt'
 
@@ -100,6 +101,7 @@ export function AppLayout() {
       </footer>
 
       <KeyboardShortcuts />
+      <RefreshButton />
       <UpdatePrompt />
     </div>
   )

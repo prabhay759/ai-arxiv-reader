@@ -58,9 +58,10 @@ export function IndexStatus() {
       </div>
 
       <p className="text-xs text-faint">
-        The index rebuilds automatically every 6 hours. To refresh it now, run the{' '}
-        <strong>Build index and deploy to Pages</strong> workflow from the repository&rsquo;s
-        Actions tab.
+        The index rebuilds automatically every 6 hours. The <strong>Refresh</strong> button in
+        the corner picks up a new build without waiting for the next visit. To rebuild it
+        ahead of schedule, run the <strong>Build index and deploy to Pages</strong> workflow
+        from the repository&rsquo;s Actions tab.
       </p>
     </div>
   )
