@@ -316,6 +316,51 @@ const run = async () => {
     )
   })
 
+  await check('figures actually load', async () => {
+    // A broken figure reports nothing but a 404 in the console, so this has to
+    // assert on pixels. The regression it guards shipped to production: asset
+    // URLs were resolved against "<paper-url>/" as though the paper URL were a
+    // directory, putting every figure one level too deep.
+    const sources = await page.evaluate(() =>
+      [...document.querySelectorAll('.ltx-paper img')]
+        .map((img) => img.src)
+        .filter((src) => !src.startsWith('data:'))
+    )
+
+    if (sources.length === 0) {
+      console.log('      (this paper has no figures)')
+      return
+    }
+
+    // The exact shape of the bug: /html/<id>/<id>vN/fig.png.
+    const doubled = sources.filter((src) =>
+      /\/html\/\d{4}\.\d{4,5}(v\d+)?\/\d{4}\.\d{4,5}v\d+\//.test(src)
+    )
+    assert(doubled.length === 0, `figure URL resolved one level too deep: ${doubled[0]}`)
+
+    // Figures are lazy, so most are legitimately unloaded while offscreen —
+    // asserting on all of them would fail on a working page. Force the first
+    // one and require actual pixels.
+    const width = await page.evaluate(async () => {
+      const img = [...document.querySelectorAll('.ltx-paper img')].find(
+        (candidate) => !candidate.src.startsWith('data:')
+      )
+      if (!img) return -1
+      img.loading = 'eager'
+      img.scrollIntoView()
+      if (!img.complete) {
+        await new Promise((resolve) => {
+          img.addEventListener('load', resolve, { once: true })
+          img.addEventListener('error', resolve, { once: true })
+          setTimeout(resolve, 15000)
+        })
+      }
+      return img.naturalWidth
+    })
+    assert(width > 0, `the first figure rendered no pixels (${sources[0]})`)
+    await page.evaluate(() => window.scrollTo(0, 0))
+  })
+
   await check('progress bar reflects how far in you are', async () => {
     const value = await page.locator('[role="progressbar"]').first().getAttribute('aria-valuenow')
     assert(Number(value) > 0, `progress still 0 after scrolling (${value})`)

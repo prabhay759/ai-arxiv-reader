@@ -40,12 +40,16 @@ export async function fetchArxivHtml(
   if (!response.ok) throw new HtmlUnavailableError()
 
   const raw = await response.text()
+  // Resolve assets against the URL the document was actually served from —
+  // see absolutizeUrls. `response.url` is empty on some synthetic responses,
+  // so fall back to what we asked for.
+  const documentUrl = response.url || ARXIV_HTML(id)
   const parsed = new DOMParser().parseFromString(raw, 'text/html')
   const root = parsed.querySelector(LATEXML_ROOT)
   if (!root) throw new HtmlUnavailableError()
 
   stripChrome(root)
-  absolutizeUrls(root, id)
+  absolutizeUrls(root, documentUrl)
 
   const toc = buildToc(root)
   const abstract = root.querySelector('.ltx_abstract p')?.textContent?.trim()
@@ -108,12 +112,19 @@ function stripChrome(root: Element): void {
 }
 
 /**
- * Figure images are relative to the paper's directory (e.g.
- * "2608.07460v1/figures/fig_1.png"), and internal links are fragment-relative.
- * Both break once the markup is moved into our page, so resolve them here.
+ * Rewrite the paper's relative URLs to absolute ones, since the markup is
+ * being moved into a page on a different origin and path.
+ *
+ * Resolution is against the URL the document was *served* from, exactly as a
+ * browser would do it. The previous version built the base by appending a
+ * slash to the paper URL, which treats "/html/2608.07460" as a directory when
+ * it is a document: a figure src of "2608.07460v1/fig.png" then resolved to
+ * "/html/2608.07460/2608.07460v1/fig.png" — one level too deep, and a 404 for
+ * every figure in every paper. Nothing failed loudly; the images were simply
+ * missing, and the 404s looked like ordinary console noise.
  */
-function absolutizeUrls(root: Element, id: string): void {
-  const base = `${ARXIV_HTML(id)}/`
+function absolutizeUrls(root: Element, documentUrl: string): void {
+  const base = documentUrl
 
   root.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
     const src = img.getAttribute('src')
