@@ -2,8 +2,8 @@
   "$comment": "Knobs for the CI data pipeline. Scope is core AI: the six categories where AI research actually lands. Robotics (cs.RO), information retrieval (cs.IR) and multiagent systems (cs.MA) are deliberately excluded — they were the main source of non-AI results. Note that cs.AI alone is NOT sufficient: arXiv authors tag inconsistently, and papers such as Attention Is All You Need (cs.CL, cs.LG), BERT (cs.CL) and ResNet (cs.CV) carry no cs.AI tag at all.",
   "categories": ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"],
 
-  "$comment_historyStart": "Passed to OAI-PMH as `from`, which filters on MODIFICATION date rather than submission date. Papers first published earlier but revised since this date are therefore included too — free extra coverage of still-active work.",
-  "historyStart": "2021-08-01",
+  "$comment_historyStart": "Passed to OAI-PMH as `from`, which filters on MODIFICATION date rather than submission date. Papers first published earlier but revised since this date are included too — free extra coverage of still-active work. The flip side is what set this value: a landmark paper that has NOT been revised falls outside the window entirely. At 2021-08-01, seven of ten landmark AI papers were missing — BERT, GPT-3, ResNet, GANs, Adam, ViT and DQN — while Attention Is All You Need was present only because it was revised in 2023. Widened to the transformer era. Measured cost: about 128,500 more papers, roughly 570,000 total, projected at 334 MB against GitHub Pages' 1 GB limit at the observed 614 bytes per paper. See docs/next-corpus-and-related.md.",
+  "historyStart": "2017-01-01",
 
   "$comment_abstractWindowMonths": "How far back abstracts are indexed for full-text search. null means no limit, so every abstract in the corpus is searchable. Abstracts dominate the size budget — set a number of months here first if the site outgrows GitHub Pages' 1 GB; papers outside the window stay searchable by title, author and category.",
   "abstractWindowMonths": null,
