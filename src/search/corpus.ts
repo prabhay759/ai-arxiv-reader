@@ -352,7 +352,14 @@ export class CorpusClient {
    * Callers fall back to deriving metadata from arXiv directly, so any paper
    * on arXiv still opens.
    */
-  async findById(id: string, signal?: AbortSignal): Promise<PaperSummary | null> {
+  /**
+   * Internal doc id for an arXiv id, or undefined if it isn't in the corpus.
+   *
+   * Separate from findById because callers that already have the paper — the
+   * related-papers query, which needs to exclude the seed from its own
+   * results — would otherwise pay for a doc chunk they are not going to read.
+   */
+  async docIdOf(id: string, signal?: AbortSignal): Promise<number | undefined> {
     const bare = id.replace(/v\d+$/, '')
     const key = idShardKey(bare)
 
@@ -368,7 +375,17 @@ export class CorpusClient {
       this.idShards.set(key, pending)
     }
 
-    const docId = (await pending)?.[bare]
+    return (await pending)?.[bare]
+  }
+
+  /**
+   * Find a paper by its arXiv id. Returns null when the paper isn't in the
+   * built corpus — an older paper, or one outside the configured categories.
+   * Callers fall back to deriving metadata from arXiv directly, so any paper
+   * on arXiv still opens.
+   */
+  async findById(id: string, signal?: AbortSignal): Promise<PaperSummary | null> {
+    const docId = await this.docIdOf(id, signal)
     if (docId === undefined) return null
 
     const resolved = await this.resolve([docId], signal)

@@ -23,6 +23,7 @@ import { BookmarkButton } from '@/components/BookmarkButton'
 import { PaperToolbar } from '@/components/PaperToolbar'
 import { ReaderSidebar } from '@/components/ReaderSidebar'
 import { ReadingPath } from '@/components/ReadingPath'
+import { RelatedPapers } from '@/components/RelatedPapers'
 import { HtmlReader } from '@/reader/HtmlReader'
 import type { ReadingUnit } from '@/reader/units'
 import { PdfReader } from '@/reader/PdfReader'
@@ -302,6 +303,8 @@ export default function Paper() {
             onOutline={setOutline}
           />
         )}
+
+        <RelatedPapers paper={paper} />
       </div>
 
       <ReaderSidebar
