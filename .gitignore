@@ -12,6 +12,8 @@ dist-ssr/
 coverage/
 e2e/screenshots/
 e2e/.artifacts/
+# Written by the sync round-trip check.
+e2e/backup.json
 
 # Harvested corpus + generated shards. These are built by CI and deployed as a
 # Pages artifact; committing them would bloat git history on every refresh.

@@ -624,7 +624,7 @@ const run = async () => {
     const downloading = page.waitForEvent('download', { timeout: 20000 })
     await page.getByRole('button', { name: 'Export library (JSON)' }).click()
     const backup = await downloading
-    const backupPath = path.join(SHOTS, '..', 'backup.json')
+    const backupPath = path.join(SHOTS, 'backup.json')
     await backup.saveAs(backupPath)
 
     const saved = JSON.parse(await readFile(backupPath, 'utf8'))
