@@ -541,6 +541,119 @@ const run = async () => {
   await mobilePage.screenshot({ path: path.join(SHOTS, '08-mobile-reader.png') })
   await mobile.close()
 
+  // ------------------------------------------------- continue reading list
+  console.log('\nContinue reading list')
+
+  const shelf = () => page.getByRole('region', { name: 'Continue reading' })
+  const shelfCards = () => shelf().locator('#continue-panel li')
+  // The remove buttons are labelled "Remove <title> from Continue reading",
+  // so a loose match would find those too.
+  const shelfToggle = () => shelf().getByRole('button', { name: /^Continue reading/ })
+
+  await check('lists papers you have started', async () => {
+    await page.goto(BASE, { waitUntil: 'networkidle' })
+
+    // Seed the shelf rather than depending on what earlier checks left behind:
+    // one of them removes a card, and a shelf that happens to hold exactly one
+    // paper disappears entirely, taking the rest of this section with it.
+    await page.evaluate(async (seedIds) => {
+      const open = indexedDB.open('arxiv-reader')
+      const database = await new Promise((resolve) => {
+        open.onsuccess = () => resolve(open.result)
+      })
+      const now = Date.now()
+      await new Promise((resolve) => {
+        const tx = database.transaction(['papers', 'progress'], 'readwrite')
+        seedIds.forEach((id, index) => {
+          tx.objectStore('papers').put({
+            id,
+            title: `Seeded shelf paper ${index + 1}`,
+            authors: ['E2E'],
+            categories: ['cs.AI'],
+            published: '2026-08-13',
+            cachedAt: now,
+          })
+          tx.objectStore('progress').put({
+            paperId: id,
+            anchor: { mode: 'html', percent: 0.3 },
+            total: 10,
+            updatedAt: now + index,
+          })
+        })
+        tx.oncomplete = resolve
+        tx.onerror = resolve
+      })
+    }, ['9901.00001', '9901.00002'])
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await shelf().waitFor({ timeout: 20000 })
+    assert((await shelfCards().count()) >= 2, 'the seeded papers did not reach the shelf')
+  })
+
+  await check('collapses and stays collapsed across a reload', async () => {
+    // A panel that springs back open on every visit has not been collapsed,
+    // it has been dismissed for a moment.
+    const toggle = shelfToggle()
+    assert((await toggle.getAttribute('aria-expanded')) === 'true', 'panel did not start open')
+
+    await toggle.click()
+    await page.waitForTimeout(300)
+    assert((await toggle.getAttribute('aria-expanded')) === 'false', 'aria-expanded did not flip')
+    assert(!(await shelfCards().first().isVisible()), 'cards still visible when collapsed')
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await shelf().waitFor({ timeout: 20000 })
+    const after = shelfToggle()
+    assert(
+      (await after.getAttribute('aria-expanded')) === 'false',
+      'the panel reopened itself after a reload'
+    )
+
+    await after.click()
+    await page.waitForTimeout(300)
+    assert(await shelfCards().first().isVisible(), 'panel did not reopen when asked')
+  })
+
+  await check('removes a paper, and it stays removed', async () => {
+    const before = await shelfCards().count()
+    const title = await shelfCards().first().locator('p').first().textContent()
+
+    await shelfCards().first().getByRole('button', { name: /^Remove/ }).click({ force: true })
+    await page.waitForTimeout(800)
+
+    assert(
+      (await shelfCards().count()) === before - 1,
+      `expected ${before - 1} cards after removing one, saw ${await shelfCards().count()}`
+    )
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForTimeout(1500)
+    const titles = await shelf().locator('#continue-panel li p').allTextContents()
+    assert(
+      !titles.includes(title ?? '__none__'),
+      'the removed paper came back after a reload'
+    )
+  })
+
+  await check('removing does not evict the paper from the library', async () => {
+    // "Stop suggesting this" is not "forget I ever read it".
+    await page.goto(`${BASE}library`, { waitUntil: 'networkidle' })
+    await page.waitForSelector('h3 a', { timeout: 15000 })
+    assert((await page.locator('h3 a').count()) > 0, 'the library was emptied by the removal')
+  })
+
+  await check('the card still opens the paper', async () => {
+    // The remove button sits inside the card, so the click target had to be a
+    // stretched link rather than an anchor wrapping everything — this is the
+    // check that the restructure did not break opening a paper.
+    await page.goto(BASE, { waitUntil: 'networkidle' })
+    await shelf().waitFor({ timeout: 20000 })
+    assert((await shelfCards().count()) > 0, 'shelf unexpectedly empty')
+
+    await shelfCards().first().locator('a').first().click()
+    await page.waitForURL(/\/paper\//, { timeout: 15000 })
+  })
+
   // -------------------------------------------------------- reading path
   console.log('\nGuided reading path')
 

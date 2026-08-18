@@ -7,13 +7,15 @@ import { categoryName, percentLabel } from '@/app/format'
 import { useCorpusCategories } from '@/app/useManifest'
 import { EmptyState, ErrorNote, Spinner } from '@/components/EmptyState'
 import { PaperCard } from '@/components/PaperCard'
-import { continueReading } from '@/store/library'
+import { useCollapsed } from '@/app/uiPrefs'
+import { clearProgress, continueReading } from '@/store/library'
 import { db } from '@/store/db'
 
 export default function Home() {
   const [recent, setRecent] = useState<PaperSummary[]>()
   const [error, setError] = useState<string>()
   const categories = useCorpusCategories()
+  const [collapsed, toggleCollapsed] = useCollapsed('continue-reading')
 
   // Re-reads whenever progress changes, so finishing a paper drops it from
   // the shelf immediately.
@@ -41,38 +43,83 @@ export default function Home() {
           the first section so it doesn't pick up the stack's spacing. */}
       {resuming && resuming.length > 0 && (
         <section aria-labelledby="continue-heading">
-          <div className="mb-3 flex items-baseline justify-between">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            {/* A button inside the heading, rather than beside it: the whole
+                thing is the disclosure control, and screen readers still get
+                a real heading to navigate by. */}
             <h2 id="continue-heading" className="text-lg font-semibold">
-              Continue reading
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-expanded={!collapsed}
+                aria-controls="continue-panel"
+                className="flex items-center gap-1.5 transition-colors hover:text-accent"
+              >
+                <Chevron open={!collapsed} />
+                Continue reading
+                <span className="text-sm font-normal tabular-nums text-faint">
+                  {resuming.length}
+                </span>
+              </button>
             </h2>
             <Link to="/library" className="text-sm text-muted hover:text-ink">
               All saved →
             </Link>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {resuming.map(({ progress, paper }) => (
-              <Link
-                key={paper.id}
-                to={`/paper/${encodeURIComponent(paper.id)}`}
-                className="card group p-3 transition-shadow hover:shadow-sm"
-              >
-                <p className="line-clamp-2 text-sm font-medium group-hover:text-accent">
-                  {paper.title}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-raised">
-                    <div
-                      className="h-full bg-accent"
-                      style={{ width: percentLabel(progress.anchor.percent) }}
-                    />
+          {/* The wrapper carries `hidden` and no display utility of its own.
+              Tailwind's `[hidden]{display:none}` and `.grid` have equal
+              specificity, so putting both on one element leaves it visible. */}
+          <div id="continue-panel" hidden={collapsed}>
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {resuming.map(({ progress, paper }) => (
+                <li
+                  key={paper.id}
+                  className="card group relative p-3 transition-shadow hover:shadow-sm"
+                >
+                  {/* Stretched link: the card is one big target, but the
+                      remove button stays a separate control rather than being
+                      nested inside an anchor. */}
+                  <Link
+                    to={`/paper/${encodeURIComponent(paper.id)}`}
+                    className="after:absolute after:inset-0 after:content-['']"
+                  >
+                    <p className="line-clamp-2 pr-6 text-sm font-medium group-hover:text-accent">
+                      {paper.title}
+                    </p>
+                  </Link>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-raised">
+                      <div
+                        className="h-full bg-accent"
+                        style={{ width: percentLabel(progress.anchor.percent) }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-xs tabular-nums text-faint">
+                      {percentLabel(progress.anchor.percent)}
+                    </span>
                   </div>
-                  <span className="shrink-0 text-xs tabular-nums text-faint">
-                    {percentLabel(progress.anchor.percent)}
-                  </span>
-                </div>
-              </Link>
-            ))}
+
+                  <button
+                    type="button"
+                    onClick={() => void clearProgress(paper.id)}
+                    aria-label={`Remove ${paper.title} from Continue reading`}
+                    title="Remove from Continue reading. Forgets your place; the paper, your highlights and your notes all stay."
+                    className="absolute right-1.5 top-1.5 z-10 rounded p-1 leading-none text-faint opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-hidden="true">
+                      <path
+                        d="M4 4l8 8M12 4l-8 8"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}
@@ -127,5 +174,22 @@ export default function Home() {
         )}
       </section>
     </div>
+  )
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className={`h-3.5 w-3.5 shrink-0 text-faint transition-transform ${open ? '' : '-rotate-90'}`}
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 6l4 4 4-4" />
+    </svg>
   )
 }
