@@ -1,5 +1,5 @@
 # Brainstorm Model
-Updated: 2026-08-16 · Sessions: 1
+Updated: 2026-08-18 · Sessions: 2
 
 ## Idea register
 | Idea | Type | Status | Last touched | Artifact |
@@ -8,6 +8,11 @@ Updated: 2026-08-16 · Sessions: 1
 | Index-generated terminology drills | System design | Parked — strongest complement to the above; quality unproven | 2026-08-16 | same doc, "Options considered" |
 | Highlights → FSRS flashcards | System design | Parked — rebuilds Readwise Daily Review | 2026-08-16 | same doc |
 | Social / leaderboards | — | **Killed** — requires a backend, ruled out by architecture | 2026-08-16 | same doc |
+| Guided section read | System design | **Built and shipped** (rating layer included; the 1-week gate was skipped) | 2026-08-18 | `docs/guided-reading.md` |
+| Widen corpus to 2017 | System design | **Chosen** — 7/10 landmark papers missing today | 2026-08-18 | `docs/next-corpus-and-related.md` |
+| Related papers from the local index | System design | **Chosen** — prototype verified against live data | 2026-08-18 | same doc |
+| Citation graph via OpenAlex | System design | Parked — CORS confirmed, coverage unmeasured (429 from this IP) | 2026-08-18 | same doc |
+| Personal feed from saved searches | System design | Parked — cheap, non-gamified reason to return | 2026-08-18 | same doc |
 
 ## Decisions log
 - 2026-08-16 — Duolingo mechanics: adopt the *learning* machinery (bite-sized units,
@@ -22,6 +27,13 @@ Updated: 2026-08-16 · Sessions: 1
   only. Because the premortem's strongest failure story is prompt fatigue, and a week of
   no code falsifies it.
 
+- 2026-08-18 — Build corpus widening before related papers, because a search engine that
+  cannot find ResNet is broken in a way no feature compensates for, and it is one line of
+  config. Reversible.
+- 2026-08-18 — Do not build on OpenAlex yet. Its CORS header is confirmed but its coverage
+  of recent arXiv preprints could not be measured from a rate-limited shared IP, and it is
+  the only candidate that breaks the offline property. Revisit with a real measurement.
+
 ## Parking lot
 - Index-generated drills (option B) — the only thing that supplies real *testing*; option
   A is Duolingo's skeleton without its nervous system. Cheapest test: generate 50
@@ -30,6 +42,10 @@ Updated: 2026-08-16 · Sessions: 1
   earlier work, unrelated to this session. Config change + one ~90-min rebuild.
 
 ## Open experiments
+- OpenAlex coverage of week-old arXiv preprints, from an un-throttled address. Blocks the
+  citation-graph direction entirely. **Not yet run.**
+- Human-judged relevance for related papers over ~30 seeds; only an 82% category-overlap
+  proxy exists. **Not yet run.**
 - Guided reading: ship path + passive completion only, use on 5 papers for a week. If
   flagging a section is never wanted, drop the rating layer. **Not yet run.**
 - Unit-size measurement was n=8 papers. Re-run at n≥100 before building the splitter.
@@ -49,3 +65,10 @@ Updated: 2026-08-16 · Sessions: 1
   to this session, still open across the project).
 - Whether to publish design docs as shareable artifacts or keep them in-repo — kept
   in-repo this time.
+
+- 2026-08-18: Three measurements this session each corrected a number I would otherwise
+  have asserted. Size per paper was 614 B, not the ~977 B in the earlier doc. Index shards
+  average 71 KB overall but 544 KB among those real queries actually hit. And my first
+  related-papers prototype returned matches on `fre`/`ncy`/`usion` because ranking by
+  rarest-term-first reliably selects typos — the output looked like an index bug and was a
+  heuristic bug. Prototype before recommending, on this project especially.
