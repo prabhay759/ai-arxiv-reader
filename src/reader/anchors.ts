@@ -163,24 +163,55 @@ export function restorePdfAnchor(
  */
 export function createProgressSaver(
   save: () => void,
-  delayMs = 900
+  delayMs = 900,
+  maxDelayMs = 1200
 ): { schedule: () => void; flush: () => void; dispose: () => void } {
   let timer: number | undefined
+  let firstRequestedAt: number | undefined
+
+  const run = () => {
+    timer = undefined
+    firstRequestedAt = undefined
+    save()
+  }
 
   const flush = () => {
     if (timer !== undefined) {
       window.clearTimeout(timer)
       timer = undefined
     }
+    firstRequestedAt = undefined
     save()
   }
 
+  /**
+   * Debounced, but with a ceiling.
+   *
+   * A plain debounce can be deferred forever, and on a real paper it is:
+   * figures load, the layout shifts, that fires another scroll event, and the
+   * timer restarts. The position then never reaches IndexedDB while the page
+   * is still settling — so a reader who scrolls and immediately reloads comes
+   * back to the top, which is precisely the thing this file exists to prevent.
+   * (`pagehide` flushes too, but a flush at teardown issues an async write the
+   * browser will not wait for.)
+   *
+   * So: quiet for `delayMs` saves, and continuous activity still saves at
+   * least every `maxDelayMs`. Measured on a real paper, a single scrollTo
+   * produces ~40 scroll events over ~700ms as figures land, so the ceiling is
+   * what actually bounds how stale the stored position can be.
+   */
   const schedule = () => {
+    const now = Date.now()
+    if (firstRequestedAt === undefined) firstRequestedAt = now
+
+    if (now - firstRequestedAt >= maxDelayMs) {
+      if (timer !== undefined) window.clearTimeout(timer)
+      run()
+      return
+    }
+
     if (timer !== undefined) window.clearTimeout(timer)
-    timer = window.setTimeout(() => {
-      timer = undefined
-      save()
-    }, delayMs)
+    timer = window.setTimeout(run, Math.min(delayMs, firstRequestedAt + maxDelayMs - now))
   }
 
   const onVisibility = () => {

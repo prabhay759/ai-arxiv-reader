@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import type { LibraryEntry, SyncDocument } from '@/types'
-import { EMPTY_SYNC_DOCUMENT, mergeDocuments, mergeRecords, pruneTombstones } from './merge'
+import type { LibraryEntry, ReadingUnitState, SyncDocument } from '@/types'
+import {
+  EMPTY_SYNC_DOCUMENT,
+  mergeDocuments,
+  mergeRecords,
+  normalizeDocument,
+  pruneTombstones,
+} from './merge'
+
+function unitState(
+  unitKey: string,
+  updatedAt: number,
+  overrides: Partial<ReadingUnitState> = {}
+): ReadingUnitState {
+  return {
+    id: `2608.13560#${unitKey}`,
+    paperId: '2608.13560',
+    unitKey,
+    label: unitKey,
+    ordinal: 0,
+    done: true,
+    updatedAt,
+    ...overrides,
+  }
+}
 
 function entry(paperId: string, updatedAt: number, overrides: Partial<LibraryEntry> = {}) {
   return {
@@ -136,5 +159,71 @@ describe('pruneTombstones', () => {
     const ancient = now - 400 * 24 * 3600 * 1000
     const doc = { ...EMPTY_SYNC_DOCUMENT, library: [entry('a', ancient)] }
     expect(pruneTombstones(doc, now).library).toHaveLength(1)
+  })
+})
+
+
+describe('reading units sync', () => {
+  it('merges unit state by id, newest wins', () => {
+    const merged = mergeDocuments(
+      { ...EMPTY_SYNC_DOCUMENT, readingUnits: [unitState('method', 200, { rating: 'lost' })] },
+      { ...EMPTY_SYNC_DOCUMENT, readingUnits: [unitState('method', 100, { rating: 'got' })] }
+    )
+    expect(merged.readingUnits).toHaveLength(1)
+    expect(merged.readingUnits[0].rating).toBe('lost')
+  })
+
+  it('unions units read on different devices', () => {
+    const merged = mergeDocuments(
+      { ...EMPTY_SYNC_DOCUMENT, readingUnits: [unitState('intro', 1)] },
+      { ...EMPTY_SYNC_DOCUMENT, readingUnits: [unitState('method', 1, { id: '2608.13560#method' })] }
+    )
+    expect(merged.readingUnits.map((u) => u.unitKey).sort()).toEqual(['intro', 'method'])
+  })
+
+  it('prunes unit tombstones on the same schedule as everything else', () => {
+    const old = 120 * 24 * 60 * 60 * 1000
+    const doc = {
+      ...EMPTY_SYNC_DOCUMENT,
+      readingUnits: [unitState('gone', 0, { deleted: true }), unitState('kept', old)],
+    }
+    const pruned = pruneTombstones(doc, old)
+    expect(pruned.readingUnits.map((u) => u.unitKey)).toEqual(['kept'])
+  })
+})
+
+describe('documents written by an older build', () => {
+  // The regression this guards: a document already sitting in someone's Drive
+  // predates `readingUnits`, so it arrives without that key. Reading .length
+  // off undefined turns a feature addition into "sync is broken" for exactly
+  // the people who have used the app longest.
+  const legacy = {
+    schema: 1 as const,
+    updatedAt: 5,
+    progress: [],
+    library: [entry('a', 5)],
+    collections: [],
+    highlights: [],
+    notes: [],
+    savedSearches: [],
+  }
+
+  it('merges against a document with no readingUnits at all', () => {
+    const merged = mergeDocuments(
+      { ...EMPTY_SYNC_DOCUMENT, readingUnits: [unitState('intro', 9)] },
+      legacy as unknown as SyncDocument
+    )
+    expect(merged.readingUnits).toHaveLength(1)
+    expect(merged.library).toHaveLength(1)
+  })
+
+  it('survives a local document missing the field too', () => {
+    const merged = mergeDocuments(legacy as unknown as SyncDocument, legacy as unknown as SyncDocument)
+    expect(merged.readingUnits).toEqual([])
+  })
+
+  it('normalizes a null or truncated document rather than throwing', () => {
+    expect(normalizeDocument(null).readingUnits).toEqual([])
+    expect(normalizeDocument({ schema: 1, updatedAt: 1 }).library).toEqual([])
   })
 })

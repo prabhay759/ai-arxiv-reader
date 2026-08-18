@@ -10,7 +10,7 @@
  */
 
 import { chromium } from 'playwright'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -293,8 +293,14 @@ const run = async () => {
 
   await check('saves and restores reading position across a reload', async () => {
     // Scroll well into the paper and let the debounced save fire.
+    //
+    // The wait has to clear the save ceiling plus the IndexedDB commit, not
+    // just the debounce: one scrollTo on a real paper keeps firing scroll
+    // events for ~700ms as figures land, so the write lands well after the
+    // nominal 900ms. At 1800ms this passed with ~200ms to spare, which is not
+    // a margin — it is a race that any extra work on the page loses.
     await page.evaluate(() => window.scrollTo(0, 2600))
-    await page.waitForTimeout(1800)
+    await page.waitForTimeout(2600)
 
     const before = await page.evaluate(() => window.scrollY)
     assert(before > 800, `scroll did not take effect (y=${before})`)
@@ -489,6 +495,185 @@ const run = async () => {
 
   await mobilePage.screenshot({ path: path.join(SHOTS, '08-mobile-reader.png') })
   await mobile.close()
+
+  // -------------------------------------------------------- reading path
+  console.log('\nGuided reading path')
+
+  const pathRail = () => page.getByRole('region', { name: 'Reading path' })
+  const pathItems = () => pathRail().locator('ol > li')
+
+  await check('splits the paper into a path of units', async () => {
+    await page.goto(`${BASE}paper/${paperId}?view=html`, { waitUntil: 'domcontentloaded' })
+    await pathRail().waitFor({ timeout: 30000 })
+
+    const count = await pathItems().count()
+    assert(count >= 3, `expected a path of several units, got ${count}`)
+    // The measured shape: papers land at 8-16 units, not 30+ fragments.
+    assert(count <= 30, `path is fragmented: ${count} units`)
+
+    const progress = await pathRail().getByText(/^\d+\/\d+$/).textContent()
+    assert(/^\d+\/\d+$/.test(progress ?? ''), `no progress counter, saw ${progress}`)
+  })
+
+  await check('reports time remaining, and it is not the whole paper at the end', async () => {
+    const before = await pathRail().getByText(/min left in the path|Path complete/).textContent()
+    assert(before, 'no time-remaining line')
+  })
+
+  await check('marks units read as they scroll past', async () => {
+    const readCount = async () => {
+      const label = await pathRail().getByText(/^\d+\/\d+$/).textContent()
+      return Number((label ?? '0/0').split('/')[0])
+    }
+
+    // Start from a clean path. Units are never un-read, so whatever earlier
+    // checks scrolled through would otherwise decide whether this one can
+    // observe any change at all — which made it pass or fail by history.
+    await page.evaluate(
+      async (id) =>
+        new Promise((resolve) => {
+          const open = indexedDB.open('arxiv-reader')
+          open.onsuccess = () => {
+            const store = open.result
+              .transaction('readingUnits', 'readwrite')
+              .objectStore('readingUnits')
+            const all = store.getAll()
+            all.onsuccess = () => {
+              for (const row of all.result) if (row.paperId === id) store.delete(row.id)
+              resolve()
+            }
+            all.onerror = () => resolve()
+          }
+          open.onerror = () => resolve()
+        }),
+      paperId
+    )
+    await page.goto(`${BASE}paper/${paperId}?view=html`, { waitUntil: 'domcontentloaded' })
+    await pathRail().waitFor({ timeout: 30000 })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.waitForTimeout(1200)
+
+    const before = await readCount()
+    assert(before === 0, `expected a cleared path, saw ${before} units already read`)
+
+    // Walk down the paper the way a reader would, letting the throttled
+    // scroll handler run.
+    for (let i = 0; i < 12; i += 1) {
+      await page.mouse.wheel(0, 1400)
+      await page.waitForTimeout(200)
+    }
+    await page.waitForTimeout(2000)
+
+    const after = await readCount()
+    assert(after > before, `no units marked read after scrolling (${before} -> ${after})`)
+  })
+
+  await check('jumps to a unit when its path entry is clicked', async () => {
+    await page.mouse.wheel(0, -20000)
+    await page.waitForTimeout(400)
+
+    const target = pathItems().nth(2).getByRole('button').first()
+    const label = (await target.textContent()) ?? ''
+    await target.click()
+    await page.waitForTimeout(900)
+
+    assert(await page.evaluate(() => window.scrollY > 200), `clicking "${label}" did not scroll`)
+  })
+
+  await check('rating a unit persists across a reload', async () => {
+    const fuzzy = pathRail().getByRole('button', { name: /^Fuzzy/ }).first()
+    await fuzzy.click({ force: true })
+    await page.waitForTimeout(600)
+    assert(
+      (await fuzzy.getAttribute('aria-pressed')) === 'true',
+      'rating did not register as pressed'
+    )
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await pathRail().waitFor({ timeout: 30000 })
+    await page.waitForTimeout(800)
+
+    const pressed = await pathRail()
+      .getByRole('button', { name: /^Fuzzy/ })
+      .first()
+      .getAttribute('aria-pressed')
+    assert(pressed === 'true', 'the rating did not survive a reload')
+  })
+
+  await check('a flagged unit reaches the revisit queue and links back', async () => {
+    await page.goto(`${BASE}library`, { waitUntil: 'domcontentloaded' })
+    const revisit = page.getByRole('region', { name: 'Revisit' })
+    await revisit.waitFor({ timeout: 15000 })
+
+    const link = revisit.locator('a').first()
+    const href = await link.getAttribute('href')
+    assert(href?.includes('unit='), `revisit link carries no unit anchor: ${href}`)
+
+    await link.click()
+    await page.waitForTimeout(1500)
+    assert(page.url().includes('unit='), 'did not navigate to the flagged unit')
+  })
+
+  await check('reading position and path survive a full sync round trip', async () => {
+    // Exercises the same exportLocal -> merge -> importLocal path that Drive
+    // sync uses, through the UI, in a real browser. Drive itself needs
+    // credentials this suite does not have; everything that can lose a
+    // reader's place is in these three steps.
+    await page.goto(`${BASE}settings`, { waitUntil: 'domcontentloaded' })
+
+    const downloading = page.waitForEvent('download', { timeout: 20000 })
+    await page.getByRole('button', { name: 'Export library (JSON)' }).click()
+    const backup = await downloading
+    const backupPath = path.join(SHOTS, '..', 'backup.json')
+    await backup.saveAs(backupPath)
+
+    const saved = JSON.parse(await readFile(backupPath, 'utf8'))
+    assert(Array.isArray(saved.readingUnits), 'export carries no readingUnits array')
+    assert(saved.readingUnits.length > 0, 'export carries no reading units')
+    assert(
+      saved.readingUnits.some((unit) => unit.rating === 'fuzzy'),
+      'export lost the rating'
+    )
+    assert(saved.progress.length > 0, 'export carries no reading position')
+
+    // Wipe this device the way a fresh one would look, using the app's own
+    // "clear local data" path — deleting the database out from under an open
+    // Dexie connection just blocks.
+    page.once('dialog', (dialog) => void dialog.accept())
+    await page.getByRole('button', { name: 'Clear local data' }).click()
+    await page.getByText('Local data cleared.').waitFor({ timeout: 15000 })
+
+    await page.goto(`${BASE}library`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(500)
+    assert(
+      (await page.getByRole('region', { name: 'Revisit' }).count()) === 0,
+      'the wipe did not actually clear local data'
+    )
+
+    await page.goto(`${BASE}settings`, { waitUntil: 'domcontentloaded' })
+    await page.locator('input[type=file]').setInputFiles(backupPath)
+    await page.getByText('Library imported.').waitFor({ timeout: 15000 })
+
+    await page.goto(`${BASE}library`, { waitUntil: 'domcontentloaded' })
+    await page
+      .getByRole('region', { name: 'Revisit' })
+      .waitFor({ timeout: 15000 })
+  })
+
+  await check('the restored position reopens the paper where it was left', async () => {
+    await page.goto(`${BASE}paper/${paperId}?view=html`, { waitUntil: 'domcontentloaded' })
+    await pathRail().waitFor({ timeout: 30000 })
+    await page.waitForTimeout(2500)
+
+    assert(
+      await page.evaluate(() => window.scrollY > 200),
+      'restored document opened at the top instead of the saved position'
+    )
+
+    const label = await pathRail().getByText(/^\d+\/\d+$/).textContent()
+    const [read] = (label ?? '0/0').split('/').map(Number)
+    assert(read > 0, 'the restored path shows nothing read')
+  })
 
   // ------------------------------------------------------------- refresh
   console.log('\nRefresh')

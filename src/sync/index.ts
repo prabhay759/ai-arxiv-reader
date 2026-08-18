@@ -4,11 +4,11 @@ import { useAppStore } from '@/app/store'
 import { SYNC_AVAILABLE } from '@/app/services'
 import { ReauthRequiredError, getAccessToken, fetchUserInfo, signOut } from './auth'
 import { ConcurrentWriteError, readRemote, writeRemote } from './drive'
-import { EMPTY_SYNC_DOCUMENT, mergeDocuments, pruneTombstones } from './merge'
+import { EMPTY_SYNC_DOCUMENT, mergeDocuments, normalizeDocument, pruneTombstones } from './merge'
 
 /** Snapshot everything syncable out of IndexedDB. */
 export async function exportLocal(): Promise<SyncDocument> {
-  const [progress, library, collections, highlights, notes, savedSearches, settings] =
+  const [progress, library, collections, highlights, notes, savedSearches, readingUnits, settings] =
     await Promise.all([
       db.progress.toArray(),
       db.library.toArray(),
@@ -16,6 +16,7 @@ export async function exportLocal(): Promise<SyncDocument> {
       db.highlights.toArray(),
       db.notes.toArray(),
       db.savedSearches.toArray(),
+      db.readingUnits.toArray(),
       readSettings(),
     ])
 
@@ -28,15 +29,25 @@ export async function exportLocal(): Promise<SyncDocument> {
     highlights,
     notes,
     savedSearches,
+    readingUnits,
     settings,
   }
 }
 
 /** Write a merged document back into IndexedDB, replacing local state. */
-export async function importLocal(doc: SyncDocument): Promise<void> {
+export async function importLocal(incoming: Partial<SyncDocument>): Promise<void> {
+  const doc = normalizeDocument(incoming)
   await db.transaction(
     'rw',
-    [db.progress, db.library, db.collections, db.highlights, db.notes, db.savedSearches],
+    [
+      db.progress,
+      db.library,
+      db.collections,
+      db.highlights,
+      db.notes,
+      db.savedSearches,
+      db.readingUnits,
+    ],
     async () => {
       await Promise.all([
         db.progress.bulkPut(doc.progress),
@@ -45,6 +56,7 @@ export async function importLocal(doc: SyncDocument): Promise<void> {
         db.highlights.bulkPut(doc.highlights),
         db.notes.bulkPut(doc.notes),
         db.savedSearches.bulkPut(doc.savedSearches),
+        db.readingUnits.bulkPut(doc.readingUnits),
       ])
     }
   )
@@ -144,7 +156,15 @@ export function installSyncTriggers(): () => void {
   window.addEventListener('focus', onFocus)
 
   // Any local write is a reason to push; Dexie's hooks fire for every table.
-  const tables = [db.progress, db.library, db.collections, db.highlights, db.notes, db.savedSearches]
+  const tables = [
+    db.progress,
+    db.library,
+    db.collections,
+    db.highlights,
+    db.notes,
+    db.savedSearches,
+    db.readingUnits,
+  ]
   const unhook = tables.map((table) => {
     const handler = () => schedule()
     table.hook('creating', handler)
@@ -163,4 +183,4 @@ export function installSyncTriggers(): () => void {
   }
 }
 
-export { mergeDocuments, pruneTombstones, EMPTY_SYNC_DOCUMENT } from './merge'
+export { mergeDocuments, normalizeDocument, pruneTombstones, EMPTY_SYNC_DOCUMENT } from './merge'

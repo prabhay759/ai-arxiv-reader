@@ -7,6 +7,7 @@ import type {
   Note,
   PaperSummary,
   ReadingProgress,
+  ReadingUnitState,
   SavedSearch,
   SearchHistoryEntry,
 } from '@/types'
@@ -31,6 +32,7 @@ export class ReaderDatabase extends Dexie {
   highlights!: Table<Highlight, string>
   notes!: Table<Note, string>
   savedSearches!: Table<SavedSearch, string>
+  readingUnits!: Table<ReadingUnitState, string>
   searchHistory!: Table<SearchHistoryEntry, string>
   meta!: Table<{ key: string; value: unknown }, string>
 
@@ -46,6 +48,12 @@ export class ReaderDatabase extends Dexie {
       savedSearches: 'id, createdAt, updatedAt',
       searchHistory: 'id, at',
       meta: 'key',
+    })
+
+    // v2 adds the guided-reading path. Dexie creates the new store and leaves
+    // every existing one untouched, so nothing already on the device moves.
+    this.version(2).stores({
+      readingUnits: 'id, paperId, updatedAt, rating, done',
     })
   }
 }
@@ -90,22 +98,32 @@ export async function cachedPaper(id: string): Promise<PaperSummary | undefined>
  * decide whether to offer the "merge your local data" prompt at all.
  */
 export async function localDataCount(): Promise<number> {
-  const [progress, library, highlights, notes, collections, savedSearches] = await Promise.all([
+  const counts = await Promise.all([
     db.progress.count(),
     db.library.count(),
     db.highlights.count(),
     db.notes.count(),
     db.collections.count(),
     db.savedSearches.count(),
+    db.readingUnits.count(),
   ])
-  return progress + library + highlights + notes + collections + savedSearches
+  return counts.reduce((total, count) => total + count, 0)
 }
 
 /** Wipes user data. Used by "sign out and forget this device". */
 export async function clearLocalData(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.progress, db.library, db.collections, db.highlights, db.notes, db.savedSearches, db.searchHistory],
+    [
+      db.progress,
+      db.library,
+      db.collections,
+      db.highlights,
+      db.notes,
+      db.savedSearches,
+      db.readingUnits,
+      db.searchHistory,
+    ],
     async () => {
       await Promise.all([
         db.progress.clear(),
@@ -114,6 +132,7 @@ export async function clearLocalData(): Promise<void> {
         db.highlights.clear(),
         db.notes.clear(),
         db.savedSearches.clear(),
+        db.readingUnits.clear(),
         db.searchHistory.clear(),
       ])
     }

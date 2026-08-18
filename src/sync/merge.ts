@@ -32,13 +32,43 @@ export function mergeRecords<T extends Syncable>(
 }
 
 /**
+ * Fill in fields an older build never wrote.
+ *
+ * A document already sitting in someone's Drive was written before
+ * `readingUnits` existed, so it arrives without that key and every array
+ * operation on it would throw — turning a feature addition into "sync is
+ * broken" for exactly the people who have been using the app longest. The same
+ * applies to a hand-edited or truncated JSON import.
+ */
+export function normalizeDocument(doc: Partial<SyncDocument> | null | undefined): SyncDocument {
+  return {
+    schema: 1,
+    updatedAt: doc?.updatedAt ?? 0,
+    progress: doc?.progress ?? [],
+    library: doc?.library ?? [],
+    collections: doc?.collections ?? [],
+    highlights: doc?.highlights ?? [],
+    notes: doc?.notes ?? [],
+    savedSearches: doc?.savedSearches ?? [],
+    readingUnits: doc?.readingUnits ?? [],
+    settings: doc?.settings,
+  }
+}
+
+/**
  * Merge two whole sync documents.
  *
  * Tombstones are preserved rather than dropped — a record deleted on a phone
  * must stay deleted after the laptop syncs, and the only way to express that
  * is to keep carrying the tombstone.
  */
-export function mergeDocuments(local: SyncDocument, remote: SyncDocument): SyncDocument {
+export function mergeDocuments(
+  localDoc: Partial<SyncDocument>,
+  remoteDoc: Partial<SyncDocument>
+): SyncDocument {
+  const local = normalizeDocument(localDoc)
+  const remote = normalizeDocument(remoteDoc)
+
   return {
     schema: 1,
     updatedAt: Math.max(local.updatedAt, remote.updatedAt),
@@ -48,6 +78,7 @@ export function mergeDocuments(local: SyncDocument, remote: SyncDocument): SyncD
     highlights: mergeRecords(local.highlights, remote.highlights, (r) => r.id),
     notes: mergeRecords(local.notes, remote.notes, (r) => r.paperId),
     savedSearches: mergeRecords(local.savedSearches, remote.savedSearches, (r) => r.id),
+    readingUnits: mergeRecords(local.readingUnits, remote.readingUnits, (r) => r.id),
     settings:
       (local.settings?.updatedAt ?? 0) >= (remote.settings?.updatedAt ?? 0)
         ? local.settings
@@ -64,6 +95,7 @@ export const EMPTY_SYNC_DOCUMENT: SyncDocument = {
   highlights: [],
   notes: [],
   savedSearches: [],
+  readingUnits: [],
 }
 
 /**
@@ -85,6 +117,7 @@ export function pruneTombstones(doc: SyncDocument, now = Date.now()): SyncDocume
     highlights: fresh(doc.highlights),
     notes: fresh(doc.notes),
     savedSearches: fresh(doc.savedSearches),
+    readingUnits: fresh(doc.readingUnits),
   }
 }
 
@@ -96,6 +129,7 @@ export function countRecords(doc: SyncDocument): number {
     doc.collections.length +
     doc.highlights.length +
     doc.notes.length +
-    doc.savedSearches.length
+    doc.savedSearches.length +
+    doc.readingUnits.length
   )
 }

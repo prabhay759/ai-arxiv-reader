@@ -6,6 +6,7 @@ import { percentLabel } from '@/app/format'
 import { EmptyState } from '@/components/EmptyState'
 import { PaperCard } from '@/components/PaperCard'
 import { CollectionManager } from '@/components/CollectionManager'
+import { RevisitQueue } from '@/components/RevisitQueue'
 import { db } from '@/store/db'
 import { listCollections, listLibrary, setCollections, setTags } from '@/store/library'
 import { searchNotes } from '@/store/highlights'
@@ -93,6 +94,8 @@ export default function Library() {
           activeId={activeCollection}
           onSelect={setActiveCollection}
         />
+
+        <RevisitQueue />
 
         {tags.length > 0 && (
           <section>

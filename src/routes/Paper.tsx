@@ -7,6 +7,7 @@ import type {
   PaperDetail,
   ReaderMode,
   ReadingAnchor,
+  UnitRating,
 } from '@/types'
 import { ARXIV_ABS } from '@/app/services'
 import { useAppStore } from '@/app/store'
@@ -21,11 +22,14 @@ import { ErrorNote, Spinner } from '@/components/EmptyState'
 import { BookmarkButton } from '@/components/BookmarkButton'
 import { PaperToolbar } from '@/components/PaperToolbar'
 import { ReaderSidebar } from '@/components/ReaderSidebar'
+import { ReadingPath } from '@/components/ReadingPath'
 import { HtmlReader } from '@/reader/HtmlReader'
+import type { ReadingUnit } from '@/reader/units'
 import { PdfReader } from '@/reader/PdfReader'
 import { resolvePaper } from '@/reader/resolvePaper'
 import { getProgress, saveProgress } from '@/store/library'
 import { createHighlight, listHighlights } from '@/store/highlights'
+import { listUnitStates, markUnitsDone, rateUnit } from '@/store/readingUnits'
 
 export default function Paper() {
   const { id: rawId } = useParams<{ id: string }>()
@@ -44,6 +48,10 @@ export default function Paper() {
   const [outline, setOutline] = useState<Array<{ label: string; page: number }>>([])
   const [progressPercent, setProgressPercent] = useState(0)
   const [totalUnits, setTotalUnits] = useState<number>()
+  const [units, setUnits] = useState<ReadingUnit[]>([])
+  const [currentUnitKey, setCurrentUnitKey] = useState<string>()
+  const unitsRef = useRef<ReadingUnit[]>([])
+  unitsRef.current = units
 
   // The anchor to restore is read once, before the reader mounts — reading it
   // reactively would fight the reader's own scroll tracking.
@@ -54,6 +62,11 @@ export default function Paper() {
 
   const highlights = useLiveQuery(
     async () => (id ? listHighlights(id) : []),
+    [id]
+  )
+
+  const unitStates = useLiveQuery(
+    async () => (id ? listUnitStates(id) : new Map()),
     [id]
   )
 
@@ -106,6 +119,37 @@ export default function Paper() {
     [paper]
   )
 
+  const handleUnits = useCallback((next: ReadingUnit[]) => setUnits(next), [])
+
+  const handleUnitProgress = useCallback(
+    (doneKeys: string[], currentKey?: string) => {
+      setCurrentUnitKey(currentKey)
+      if (!paper || doneKeys.length === 0) return
+      const done = unitsRef.current.filter((unit) => doneKeys.includes(unit.key))
+      // markUnitsDone is a no-op when nothing is newly finished, which matters:
+      // this fires on every scroll tick.
+      void markUnitsDone(paper.id, done)
+    },
+    [paper]
+  )
+
+  const handleRate = useCallback(
+    (unit: ReadingUnit, rating: UnitRating | undefined) => {
+      if (!paper) return
+      void rateUnit(paper, unit, rating)
+    },
+    [paper]
+  )
+
+  const scrollToUnit = useCallback((unit: ReadingUnit) => {
+    const element = document.querySelector<HTMLElement>(`[id="${CSS.escape(unit.elementId)}"]`)
+    if (!element) return
+    window.scrollTo({
+      top: window.scrollY + element.getBoundingClientRect().top - 96,
+      behavior: 'smooth',
+    })
+  }, [])
+
   const handleCreateHighlight = useCallback(
     (anchor: HighlightAnchor | null, color: HighlightColor) => {
       if (!anchor || !paper) return
@@ -142,8 +186,25 @@ export default function Paper() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params])
 
+  // `?unit=<key>` opens the paper at a specific unit — how the revisit queue
+  // sends you back to the part that did not land.
+  const requestedUnit = params.get('unit')
+  const jumpedRef = useRef<string>()
+  useEffect(() => {
+    if (!requestedUnit || units.length === 0 || jumpedRef.current === requestedUnit) return
+    const target = units.find((unit) => unit.key === requestedUnit)
+    if (!target) return
+    jumpedRef.current = requestedUnit
+    // One frame after layout, so the restored scroll position does not win.
+    const timer = window.setTimeout(() => scrollToUnit(target), 100)
+    return () => window.clearTimeout(timer)
+  }, [requestedUnit, units, scrollToUnit])
+
   const handleUnavailable = useCallback(() => {
     // arXiv has no HTML for this paper — fall back without losing the place.
+    // The path is derived from the HTML, so it goes with it; PDF mode has no
+    // section structure to build one from.
+    setUnits([])
     setMode('pdf')
   }, [])
 
@@ -226,6 +287,8 @@ export default function Paper() {
             onCreateHighlight={handleCreateHighlight}
             onSelectHighlight={() => undefined}
             onToc={setToc}
+            onUnits={handleUnits}
+            onUnitProgress={handleUnitProgress}
             onUnavailable={handleUnavailable}
           />
         ) : (
@@ -248,6 +311,17 @@ export default function Paper() {
         outline={outline}
         highlights={highlights ?? []}
         progressLabel={`${percentLabel(progressPercent)} · ${timeRemaining}`}
+        path={
+          mode === 'html' && units.length > 0 ? (
+            <ReadingPath
+              units={units}
+              states={unitStates ?? new Map()}
+              currentKey={currentUnitKey}
+              onJump={scrollToUnit}
+              onRate={handleRate}
+            />
+          ) : undefined
+        }
       />
     </div>
   )

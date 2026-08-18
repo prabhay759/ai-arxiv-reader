@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Highlight, PaperSummary, ReaderMode } from '@/types'
 import { deleteHighlight, getNote, saveNote, updateHighlight } from '@/store/highlights'
 
@@ -11,6 +11,7 @@ export function ReaderSidebar({
   outline,
   highlights,
   progressLabel,
+  path,
 }: {
   paper: PaperSummary
   mode: ReaderMode
@@ -18,6 +19,12 @@ export function ReaderSidebar({
   outline: Array<{ label: string; page: number }>
   highlights: Highlight[]
   progressLabel: string
+  /**
+   * The guided reading path. Supersedes the plain table of contents when
+   * present — it lists the same sections plus how far through them you are,
+   * and showing both would be two lists of the same thing.
+   */
+  path?: ReactNode
 }) {
   const [tab, setTab] = useState<Tab>('contents')
   const [note, setNote] = useState('')
@@ -80,7 +87,9 @@ export function ReaderSidebar({
         ))}
       </div>
 
-      {tab === 'contents' && (
+      {tab === 'contents' && path}
+
+      {tab === 'contents' && !path && (
         <nav aria-label="Table of contents">
           {contents.length === 0 ? (
             <p className="text-xs text-faint">

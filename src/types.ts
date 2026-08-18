@@ -108,6 +108,31 @@ export interface Highlight {
   deleted?: boolean
 }
 
+/** How a reading unit landed. Self-reported, and used for routing, not scoring. */
+export type UnitRating = 'got' | 'fuzzy' | 'lost'
+
+/**
+ * Per-unit reading state for the guided path.
+ *
+ * Keyed on the unit's heading-derived key rather than its element id, because
+ * arXiv renumbers element ids when it re-renders a paper — see
+ * src/reader/units.ts.
+ */
+export interface ReadingUnitState {
+  /** `${paperId}#${unitKey}`. */
+  id: string
+  paperId: PaperId
+  unitKey: string
+  /** Snapshotted so the revisit queue can name a unit without refetching the paper. */
+  label: string
+  ordinal: number
+  done: boolean
+  rating?: UnitRating
+  completedAt?: number
+  updatedAt: number
+  deleted?: boolean
+}
+
 export interface Note {
   /** One free-form note per paper; highlight notes live on the highlight. */
   paperId: PaperId
@@ -182,6 +207,8 @@ export interface SyncDocument {
   highlights: Highlight[]
   notes: Note[]
   savedSearches: SavedSearch[]
+  /** Added after the first release; absent in documents written by older builds. */
+  readingUnits: ReadingUnitState[]
   settings?: AppSettings
 }
 

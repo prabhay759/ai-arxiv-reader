@@ -1,6 +1,6 @@
 # Guided Reading — Design Decision
 
-*Status: proposed, not built. Written 2026-08-16.*
+*Status: **built**. Proposed 2026-08-16, shipped 2026-08-18. See "As built" at the end for what changed on contact with real papers.*
 
 ## Problem
 
@@ -189,3 +189,99 @@ requiring a backend. Anything requiring a model.
 - Reading speed for technical prose assumed at 200 wpm; probably optimistic.
 - PDF degradation shape is unspecified — page ranges are a guess, not a decision.
 - Whether the revisit queue should be per-paper or global across the library.
+
+
+---
+
+# As built
+
+Shipped in full on 2026-08-18, **including the rating layer** — the one-week gate
+recommended above was skipped at the user's direction. Everything below is what
+changed between the design and the code.
+
+## The gate was skipped deliberately
+
+The recommendation was to ship the path and passive completion first, use it for a
+week, and only then decide whether rating earns its place. That was overruled, so
+`fuzzy`/`lost` and the revisit queue went in with the rest. The premortem's strongest
+failure story — the prompt becomes noise, everything gets marked fine — is therefore
+untested rather than mitigated. The design does what it can: rating never blocks, never
+appears as a modal, is only offered on units already read, and lands somewhere that
+leads back to the text. Whether that is enough is now something to observe, not
+something the build settled.
+
+## Unit sizing took three tries, and the fixture lied
+
+The rule in the design — split at leaf level, collapse appendices — produced a
+**median unit of one minute and up to 31 units per paper** on real markup. Synthetic
+fixtures never showed it because modern ML papers subdivide with `\paragraph`, which
+LaTeXML emits as top-level sections. Two further rules were needed:
+
+| Rule | Body units across 8 papers | Median | Per paper |
+| --- | --- | --- | --- |
+| Leaf-level split (as designed) | 143 | 1 min | 12–31 |
+| + cap descent at subsections | 115 | 1 min | 11–29 |
+| + coalesce consecutive units under 350 words | **77** | **3 min** | **8–16** |
+
+Depth alone was not enough; **size is the criterion that matters**. Merging stops at a
+level change, so a subsection is never folded into the section above it.
+
+## Appendices were counted twice
+
+A paper that wraps its appendices in an ordinary `ltx_section` titled "Appendix" made
+that wrapper look like a leaf, so it swallowed every appendix — listed once as a
+51-minute body unit and again as the collapsed appendix block. The path claimed an hour
+more reading than the paper contained. Caught by looking at a screenshot, not by a test;
+there is now a test.
+
+## HTML coverage is not 100% after all
+
+The design reported 40/40 sampled papers having LaTeXML HTML. A second sample of 8 hit
+**one paper with none** (`2608.16855`). The honest number is "most, not all", and the
+caveat in the design — that the corpus is biased toward papers arXiv has re-rendered —
+is doing real work. PDF mode has no path; that is now a visible gap rather than a
+theoretical one.
+
+## A pre-existing defect in saving the reading position
+
+The path work surfaced a bug older than it. `createProgressSaver` was a plain debounce,
+and a plain debounce can be deferred forever: a single `scrollTo` on a real paper fires
+**~40 scroll events over ~700ms** as figures land, each one restarting the timer. The
+position could therefore never reach IndexedDB while the page was still settling — a
+reader who scrolled and immediately reloaded came back to the top. (`pagehide` flushes,
+but a flush at teardown issues an async write the browser will not wait for.)
+
+There is now a ceiling: quiet for 900ms saves, and continuous scrolling still saves at
+least every 1200ms. This was reaching production before the guided path existed; the
+feature only made it easy to hit.
+
+## What it costs
+
+`buildUnits` runs on the live DOM and is scheduled through `requestIdleCallback`, so it
+never competes with restoring the reader's position, and it walks the tree rather than
+cloning it — the first version deep-copied every container section of a megabyte-scale
+paper on the same tick as the restore.
+
+## Test coverage
+
+134 unit tests across 12 files, 44 end-to-end checks in a real browser. New:
+
+- `src/reader/units.test.ts` (17) — splitting, coalescing, appendix collapse, key stability
+- `src/store/readingUnits.test.ts` (11) — completion, rating, revisit queue, tombstones
+- `src/sync/roundtrip.test.ts` (6) — export → merge → import, two-device union, legacy documents
+- `src/reader/anchors.test.ts` (5) — the save ceiling
+- `src/sync/merge.test.ts` (+6) — unit merge, pruning, documents written before this existed
+- `e2e/reader.mjs` (+8) — path renders, units mark as read, rating survives reload, revisit
+  links back, and a full export/wipe/import round trip through the Settings UI
+
+Drive itself is not exercised — it needs credentials the suite does not have. What is
+exercised is `exportLocal → mergeDocuments → importLocal`, which is the whole of sync
+except the HTTP transport, and is where anything that could lose a reader's place lives.
+
+## Still open
+
+- The rating layer's value is unmeasured, per the skipped gate.
+- PDF-only papers get no path at all.
+- Unit-size figures come from 8 papers. Worth re-running at n≥100.
+- The header's whole-document time estimate and the path's body-only one disagree by
+  design; they are now labelled, not reconciled.

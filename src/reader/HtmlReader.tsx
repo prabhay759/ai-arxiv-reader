@@ -9,6 +9,7 @@ import {
   restoreHtmlAnchor,
 } from './anchors'
 import { fetchArxivHtml, HtmlUnavailableError, type ArxivHtmlDocument } from './arxivHtml'
+import { buildUnits, type ReadingUnit } from './units'
 import { HighlightMenu } from './HighlightMenu'
 import { paintHighlights } from './paintHighlights'
 
@@ -23,6 +24,10 @@ interface HtmlReaderProps {
   onCreateHighlight: (anchor: ReturnType<typeof anchorFromSelection>, color: HighlightColor) => void
   onSelectHighlight: (id: string) => void
   onToc: (toc: ArxivHtmlDocument['toc']) => void
+  /** Called once the markup is in the DOM and the reading path is known. */
+  onUnits: (units: ReadingUnit[]) => void
+  /** Called on scroll with every unit finished so far, and the one being read. */
+  onUnitProgress: (doneKeys: string[], currentKey?: string) => void
   onUnavailable: () => void
 }
 
@@ -34,6 +39,8 @@ export function HtmlReader({
   onCreateHighlight,
   onSelectHighlight,
   onToc,
+  onUnits,
+  onUnitProgress,
   onUnavailable,
 }: HtmlReaderProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -46,7 +53,10 @@ export function HtmlReader({
   // render or it would miss events during rapid scrolling.
   const progressRef = useRef(onProgress)
   progressRef.current = onProgress
+  const unitProgressRef = useRef(onUnitProgress)
+  unitProgressRef.current = onUnitProgress
   const anchorRef = useRef(initialAnchor)
+  const unitsRef = useRef<ReadingUnit[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -119,6 +129,35 @@ export function HtmlReader({
     return () => window.clearTimeout(timeout)
   }, [document_])
 
+  // Split the rendered paper into the reading path. Done after mount rather
+  // than during parsing because it measures the live DOM — and deferred to
+  // idle, because restoring the reader's saved position is what the first
+  // moments after mount are for. The path appearing a beat later is
+  // imperceptible; landing in the wrong place is not.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!document_ || !container) return
+
+    const build = () => {
+      if (!containerRef.current) return
+      const units = buildUnits(containerRef.current)
+      unitsRef.current = units
+      onUnits(units)
+    }
+
+    // Safari only gained requestIdleCallback in 16.4; TypeScript's DOM lib
+    // declares it unconditionally, so the guard has to be a runtime one.
+    const idle =
+      'requestIdleCallback' in window ? window.requestIdleCallback.bind(window) : undefined
+
+    const handle = idle ? idle(build, { timeout: 2000 }) : window.setTimeout(build, 300)
+
+    return () => {
+      if (idle) window.cancelIdleCallback(handle)
+      else window.clearTimeout(handle)
+    }
+  }, [document_, onUnits])
+
   // Track scroll position and persist it.
   useEffect(() => {
     if (!document_) return
@@ -130,6 +169,7 @@ export function HtmlReader({
       if (!node) return
       const sections = node.querySelectorAll('section[id]').length
       progressRef.current(captureHtmlAnchor(node, READING_LINE), sections)
+      reportUnits(node, unitsRef.current, unitProgressRef.current)
     })
 
     const onScroll = () => saver.schedule()
@@ -234,6 +274,44 @@ export function HtmlReader({
       />
     </>
   )
+}
+
+/**
+ * Work out which units are finished and which one is being read.
+ *
+ * A unit counts as finished once the *next* unit's heading rises above the
+ * reading line. Using the next unit's start rather than this one's end keeps
+ * one rule for every case — a plain section, a section intro that stops where
+ * its first subsection begins, and the collapsed appendix block — instead of
+ * three that have to agree with each other.
+ */
+function reportUnits(
+  container: HTMLElement,
+  units: ReadingUnit[],
+  report: (doneKeys: string[], currentKey?: string) => void
+): void {
+  if (units.length === 0) return
+
+  const topOf = (elementId: string): number | undefined =>
+    container
+      .querySelector<HTMLElement>(`[id="${CSS.escape(elementId)}"]`)
+      ?.getBoundingClientRect().top
+
+  const done: string[] = []
+  let current: string | undefined
+
+  units.forEach((unit, index) => {
+    const start = topOf(unit.elementId)
+    if (start !== undefined && start <= READING_LINE) current = unit.key
+
+    const next = units[index + 1]
+    const boundary = next
+      ? topOf(next.elementId)
+      : container.getBoundingClientRect().bottom
+    if (boundary !== undefined && boundary <= READING_LINE) done.push(unit.key)
+  })
+
+  report(done, current)
 }
 
 export { documentScrollPercent }
